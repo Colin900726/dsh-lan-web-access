@@ -1,6 +1,6 @@
 # dsh-lan-web-access
 
-> DeepSeek Harness（dsh）的局域网 Web 访问插件 —— 让同一台电脑上运行的 dsh，既能用桌面版 App，也能用浏览器（本机 / SSH 隧道 / 局域网）直接打开，**不再需要每次启动都会变的 token 链接**。
+> DeepSeek Harness（dsh）的局域网 Web 访问插件 —— 在**局域网或异地组网**（如 Tailscale）环境里，让多台设备用浏览器**同时访问同一台 dsh 主机**：笔记本、平板、手机随手打开就能用，多人多设备同时协作。适合家庭、小团队、超级用户、一人公司（OPC）等多设备场景。由**允许列表 + 管理密码**把关；主机本机和 SSH 隧道免 token 直接进入。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
@@ -28,9 +28,10 @@
 
 设置页（设置 → 局域网web访问）为苹果风格，分四段：**连接 / 设备 / 安全 / 关于**；局域网登录页为独立网页，五种状态。
 
-<!-- 截图占位：可放在 docs/screenshots/，然后取消下面注释
-![设置页](docs/screenshots/settings.png)
-![登录页](docs/screenshots/login.png)
+<!-- 截图占位：截图放进 docs/screenshots/（文件名见下），再取消这段注释
+![设置页 · 连接](docs/screenshots/settings-connection.png)
+![设置页 · 设备](docs/screenshots/settings-devices.png)
+![局域网登录页](docs/screenshots/login.png)
 -->
 
 ## 安装
@@ -119,7 +120,7 @@ ssh -L 19387:127.0.0.1:19387 主机地址
 | 系统 | 桌面版 | 网页版（WebUI） |
 | --- | --- | --- |
 | macOS（Apple 芯片） | ✅ | ✅ |
-| Windows（64 位） | ✅（真机待验证） | ✅ |
+| Windows（64 位） | ✅ | ✅ |
 
 支持的 dsh 版本范围：`>=0.1.7-rc.1 <0.3.0-0`。
 
