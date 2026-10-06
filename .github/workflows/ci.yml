@@ -1,0 +1,40 @@
+# 每次推送和合并请求时：安装依赖 → 类型检查 → 代码检查 → 格式检查 → 单元测试 → 编译，
+# 最后确认仓库里提交的 lib/ 和 src/ 编译出来的一致（lib/ 提交在仓库里，供用户直接从 GitHub 安装）。
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.9.1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+
+      - name: lib/ 与源码一致
+        run: |
+          if ! git diff --quiet -- lib || [ -n "$(git status --porcelain -- lib)" ]; then
+            echo "::error::lib/ 和 src/ 编译出来的不一致。请在本地运行 npm run build，把 lib/ 一起提交。"
+            git status --short -- lib
+            exit 1
+          fi

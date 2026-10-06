@@ -37,14 +37,29 @@
 
 前提：装 dsh 的电脑上已安装 dsh CLI（桌面版从 App 菜单「管理 dsh 命令…」安装）。
 
+**从 GitHub 直接安装**（免构建，仓库里已带编译好的 `lib/`）：
+
 ```sh
 # 桌面版
-dsh plugin --profile desktop add dsh-lan-web-access@latest
+dsh plugin --profile desktop add github:<你的GitHub用户名>/dsh-lan-web-access
 
 # 网页版（dsh web）
-dsh plugin --profile web add dsh-lan-web-access@latest
+dsh plugin --profile web add github:<你的GitHub用户名>/dsh-lan-web-access
 
-# 从源码 / 本地目录（尚未发布到 npm 时用这一行）
+# 指定某个版本（标签）
+dsh plugin --profile web add github:<你的GitHub用户名>/dsh-lan-web-access#v0.1.0
+```
+
+**从 npm 安装**（发布到 npm 之后可用）：
+
+```sh
+dsh plugin --profile desktop add dsh-lan-web-access@latest
+dsh plugin --profile web add dsh-lan-web-access@latest
+```
+
+**从本地目录安装**（开发时用）：
+
+```sh
 dsh plugin --profile desktop add /path/to/dsh-lan-web-access
 ```
 

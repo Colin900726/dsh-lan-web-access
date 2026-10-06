@@ -24,6 +24,17 @@ npm run build       # tsc + tsdown，产物输出到 lib/
 npm run dev         # 构建后启动 dsh web（插件需已用「从源码」方式装进 web profile）
 ```
 
+### 提交前：重新编译，把 `lib/` 一起提交
+
+`lib/` 是编译产物，但**提交在仓库里**——用户可以 `dsh plugin add github:…` 直接从 GitHub 安装，从 GitHub 装的是仓库原样内容，pnpm 默认不会替用户编译。所以：
+
+```sh
+npm run build
+git add src lib     # 改了 src，lib 必须一起提交
+```
+
+GitHub Actions 每次推送都会重新编译一遍并对比：仓库里的 `lib/` 和 `src/` 编译出来的不一致，检查就会失败（见 `.github/workflows/ci.yml`）。不要手改 `lib/` 里的文件。
+
 ## 源码结构
 
 ### 顶层结构
@@ -32,11 +43,12 @@ npm run dev         # 构建后启动 dsh web（插件需已用「从源码」�
 dsh-lan-web-access/
 ├── src/                        源码（唯一需要手改的地方）
 │   └── client/                 设置页（浏览器半）
-├── lib/                        构建产物（.gitignore 忽略；npm 发布必须包含）
+├── lib/                        构建产物（提交在仓库里，供直接从 GitHub 安装；npm 包里也带它）
 │   ├── *.js                    tsc 产出 —— node 半
 │   ├── types/**                tsc 类型声明
 │   └── client.js (+.map)       tsdown 产出 —— 浏览器半，注册进 window.__ModuleLoader__
 ├── tests/                      vitest 单元测试（16 个 spec / 146 个用例）
+├── .github/workflows/ci.yml    推送时自动检查：测试、编译、lib/ 与源码一致
 ├── cordis.patch.yml            宿主把本插件插进 Cordis 树的那一行（运行时必需）
 ├── tsconfig.json               node 半 + 类型声明构建
 ├── tsdown.config.ts            浏览器半 bundle 构建
