@@ -2,6 +2,7 @@
 
 > DeepSeek Harness（dsh）的局域网 Web 访问插件 —— 在**局域网或异地组网**（如 Tailscale）环境里，让多台设备用浏览器**同时访问同一台 dsh 主机**：笔记本、平板、手机随手打开就能用，多人多设备同时协作。适合家庭、小团队、超级用户、一人公司（OPC）等多设备场景。由**允许列表 + 管理密码**把关；主机本机和 SSH 隧道免 token 直接进入。
 
+[![npm](https://img.shields.io/npm/v/dsh-lan-web-access.svg)](https://www.npmjs.com/package/dsh-lan-web-access)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 ## 它解决什么问题
@@ -65,14 +66,21 @@
 
 | 来源 | 输入框里填 | 说明 |
 | --- | --- | --- |
+| npm（推荐） | `dsh-lan-web-access` | 只填包名；连不上 npm 官方源时会自动换国内镜像 |
 | GitHub | `https://github.com/Colin900726/dsh-lan-web-access` | **必须带 `https://`**，只写 `github.com/…` 会提示无法识别 |
 | GitHub 指定版本 | `https://github.com/Colin900726/dsh-lan-web-access#v0.1.0` | 装某个固定版本，`#` 后面是版本号 |
-| npm | `dsh-lan-web-access` | 发布到 npm 之后可用 |
 | 本地目录 | `/Users/你的用户名/dsh-lan-web-access` | 必须是**完整路径**（从 `/` 或盘符开始），开发时用 |
 
-> 从 GitHub 安装时，dsh 会直接连 GitHub 下载，**不经过国内镜像**。提示「无法访问 GitHub」或「连接 GitHub 超时」时，请配置代理后重试，或等 npm 版本发布后改填包名（npm 安装连不上官方源时会自动换国内镜像）。
+> 从 GitHub 安装时，dsh 会直接连 GitHub 下载，**不经过国内镜像**。提示「无法访问 GitHub」或「连接 GitHub 超时」时，请配置代理后重试，或改填 npm 包名 `dsh-lan-web-access`。
 
 ### 方式二：用命令行安装
+
+**从 npm 安装**（推荐）：
+
+```sh
+dsh plugin --profile desktop add dsh-lan-web-access@latest
+dsh plugin --profile web add dsh-lan-web-access@latest
+```
 
 **从 GitHub 直接安装**（免构建，仓库里已带编译好的 `lib/`）：
 
@@ -85,13 +93,6 @@ dsh plugin --profile web add github:Colin900726/dsh-lan-web-access
 
 # 指定某个版本（标签）
 dsh plugin --profile web add github:Colin900726/dsh-lan-web-access#v0.1.0
-```
-
-**从 npm 安装**（发布到 npm 之后可用）：
-
-```sh
-dsh plugin --profile desktop add dsh-lan-web-access@latest
-dsh plugin --profile web add dsh-lan-web-access@latest
 ```
 
 **从本地目录安装**（开发时用）：

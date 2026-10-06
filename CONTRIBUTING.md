@@ -156,3 +156,12 @@ dsh-lan-web-access/
 ## 许可证
 
 [MIT](./LICENSE) © 2026 Colin
+
+## 发布新版本
+
+1. 改 `package.json` 的 `version`（如 `0.1.4`），`npm run build`，连同 `lib/` 一起提交、推送。
+2. 在 GitHub 上新建 Release，标签写 `v0.1.4`（必须和 `version` 一致，前面加 `v`），发布。
+3. `.github/workflows/publish.yml` 会自动跑检查、测试、编译，然后发到 npm（npm 可信发布，不存密钥）。在仓库的 Actions 页能看到进度。
+
+同一个版本号在 npm 上只能发一次；发错了就改版本号再发一个新的。
+

@@ -1,0 +1,41 @@
+# 在 GitHub 发布一个 Release（标签形如 v0.1.4）时，自动发到 npm。
+# 用 npm「可信发布」：npm 认这个仓库的这个工作流，不需要在 GitHub 里存 npm 密钥。
+# 发布前会再跑一遍类型检查、代码检查、测试、编译（package.json 的 prepack）。
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: 标签和 package.json 的版本号一致
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Release 标签是 $GITHUB_REF_NAME，但 package.json 版本是 $want。先改 package.json 的 version 再发 Release。"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 12.9.1
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # 可信发布要求 npm 11.5.1 以上
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - run: npm publish --access public
