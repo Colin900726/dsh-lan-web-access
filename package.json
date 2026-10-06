@@ -36,7 +36,6 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-credentials": "^0.2.0-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependencies": {
@@ -52,6 +51,7 @@
   "devDependencies": {
     "@deepseek-ai/dsh-client-ui-settings": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.0-rc.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.13.4",
     "@types/react": "^18.3.1",

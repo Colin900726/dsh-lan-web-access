@@ -59,6 +59,21 @@
 
 前提：电脑上已安装 dsh（Desktop 或 Web）。
 
+### 方式一：在 dsh 里「插件 → 添加插件」（推荐）
+
+打开 dsh →「插件」→「添加插件」，在输入框里**只填下面表格里的一项**，不要填整条命令：
+
+| 来源 | 输入框里填 | 说明 |
+| --- | --- | --- |
+| GitHub | `https://github.com/Colin900726/dsh-lan-web-access` | **必须带 `https://`**，只写 `github.com/…` 会提示无法识别 |
+| GitHub 指定版本 | `https://github.com/Colin900726/dsh-lan-web-access#v0.1.0` | 装某个固定版本，`#` 后面是版本号 |
+| npm | `dsh-lan-web-access` | 发布到 npm 之后可用 |
+| 本地目录 | `/Users/你的用户名/dsh-lan-web-access` | 必须是**完整路径**（从 `/` 或盘符开始），开发时用 |
+
+> 从 GitHub 安装时，dsh 会直接连 GitHub 下载，**不经过国内镜像**。提示「无法访问 GitHub」或「连接 GitHub 超时」时，请配置代理后重试，或等 npm 版本发布后改填包名（npm 安装连不上官方源时会自动换国内镜像）。
+
+### 方式二：用命令行安装
+
 **从 GitHub 直接安装**（免构建，仓库里已带编译好的 `lib/`）：
 
 ```sh
