@@ -3,7 +3,7 @@
  * 后端只返回错误码，界面上的话由前端文案表（src/client/strings.ts）按码给出。
  */
 
-/** 运行环境：桌面版 / 网页版（按 dsh profile 名判断）。 */
+/** 运行环境：Desktop / Web（按 dsh profile 名判断）。 */
 export type Edition = 'desktop' | 'web' | 'unknown';
 
 /** 管理接口返回给前端的错误码。 */

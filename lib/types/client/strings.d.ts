@@ -19,7 +19,7 @@ export declare const zh: {
     /** 安全退出时状态头下方的红条：标题写第一项没通过的，正文说影响和怎么办。 */
     readonly fault: {
         readonly title: Record<string, string>;
-        readonly body: "免 token 和局域网入口已关闭，桌面版不受影响。等插件更新后到「关于」点「重新检查」。";
+        readonly body: "免 token 和局域网入口已关闭，Desktop 不受影响。等插件更新后到「关于」点「重新检查」。";
         readonly more: "查看运行检查";
     };
     readonly tabs: {
@@ -182,8 +182,8 @@ export declare const zh: {
         readonly dsh: "dsh";
         readonly runtime: "运行环境";
         readonly edition: {
-            readonly desktop: "桌面版";
-            readonly web: "网页版";
+            readonly desktop: "Desktop";
+            readonly web: "Web";
             readonly unknown: "未知";
         };
         readonly port: (p: number) => string;

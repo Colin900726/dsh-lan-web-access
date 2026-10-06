@@ -32,7 +32,7 @@ export const zh = {
       sessionKey: '局域网登录密钥没准备好',
       dshVersion: 'dsh 版本超出插件支持的范围',
     } as Record<string, string>,
-    body: '免 token 和局域网入口已关闭，桌面版不受影响。等插件更新后到「关于」点「重新检查」。',
+    body: '免 token 和局域网入口已关闭，Desktop 不受影响。等插件更新后到「关于」点「重新检查」。',
     more: '查看运行检查',
   },
 
@@ -198,7 +198,7 @@ export const zh = {
     plugin: '插件',
     dsh: 'dsh',
     runtime: '运行环境',
-    edition: { desktop: '桌面版', web: '网页版', unknown: '未知' },
+    edition: { desktop: 'Desktop', web: 'Web', unknown: '未知' },
     port: (p: number) => `主端口 ${p}`,
     unknownVersion: '未知',
     dshInRange: (v: string) => `${v} · 在支持范围内`,

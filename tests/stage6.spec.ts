@@ -10,19 +10,19 @@ afterEach(() => {
 });
 
 describe('R-022 一键更新的命令按系统选', () => {
-  it('Given Windows 网页版，Then 用 dsh.cmd 并经 shell 启动', () => {
+  it('Given Windows Web，Then 用 dsh.cmd 并经 shell 启动', () => {
     expect(resolveUpdateCommand('web', 'win32', undefined)).toEqual({
       cmd: 'dsh.cmd',
       args: ['plugin', '--profile', 'web', 'update', 'dsh-lan-web-access'],
       shell: true,
     });
   });
-  it('Given macOS 网页版，Then 直接启动 dsh，不经 shell', () => {
+  it('Given macOS Web，Then 直接启动 dsh，不经 shell', () => {
     const c = resolveUpdateCommand('web', 'darwin', undefined);
     expect(c.cmd).toBe('dsh');
     expect(c.shell).toBeUndefined();
   });
-  it('Given 桌面版（两个系统都一样），Then 用桌面版自带的运行时启动包里的 cli.js', () => {
+  it('Given Desktop（两个系统都一样），Then 用 Desktop 自带的运行时启动包里的 cli.js', () => {
     for (const platform of ['win32', 'darwin'] as const) {
       const c = resolveUpdateCommand('desktop', platform, join('R', 'resources'));
       expect(c.cmd).toBe(process.execPath);

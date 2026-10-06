@@ -48,11 +48,11 @@ function canConnect(port: number): Promise<boolean> {
 }
 
 describe('R-009 局域网端口默认值', () => {
-  it('Given 没设过端口，Then 桌面版用 19388、网页版用 3081（主端口 + 1）', () => {
+  it('Given 没设过端口，Then Desktop 用 19388、Web 用 3081（主端口 + 1）', () => {
     expect(effectiveLanPort({ lanPort: null }, 19387)).toBe(19388);
     expect(effectiveLanPort({ lanPort: null }, 3080)).toBe(3081);
   });
-  it('Given 设置文件里的端口正好等于 dsh 主端口（从桌面版带过来装到了网页版），Then 退回主端口 + 1，不和 dsh 抢', () => {
+  it('Given 设置文件里的端口正好等于 dsh 主端口（从 Desktop 带过来装到了 Web），Then 退回主端口 + 1，不和 dsh 抢', () => {
     expect(effectiveLanPort({ lanPort: 3080 }, 3080)).toBe(3081);
   });
   it('Given 用户设过别的端口，Then 用用户的', () => {

@@ -36,7 +36,7 @@ describe('isValidPort', () => {
     expect(isValidPort(70000, 19387)).toBe(false);
     expect(isValidPort('x', 19387)).toBe(false);
   });
-  it('网页版主端口 3080 时，3080 不可用、19387 可用（端口按 dsh 实际读，不写死）', () => {
+  it('Web 主端口 3080 时，3080 不可用、19387 可用（端口按 dsh 实际读，不写死）', () => {
     expect(isValidPort(3080, 3080)).toBe(false);
     expect(isValidPort(19387, 3080)).toBe(true);
   });

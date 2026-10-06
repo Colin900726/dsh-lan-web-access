@@ -74,17 +74,17 @@ describe('R-013 总开关', () => {
 });
 
 describe('R-006 双版本识别', () => {
-  it('Given 装在网页版（profile=web），Then 运行环境是网页版', () => {
+  it('Given 装在 Web（profile=web），Then 运行环境是 Web', () => {
     expect(editionOf('web')).toBe('web');
   });
-  it('Given 装在桌面版（profile=desktop），Then 运行环境是桌面版', () => {
+  it('Given 装在 Desktop（profile=desktop），Then 运行环境是 Desktop', () => {
     expect(editionOf('desktop')).toBe('desktop');
   });
   it('Given 识别不出 profile，Then 运行环境写未知，不猜', () => {
     expect(editionOf('unknown')).toBe('unknown');
     expect(editionOf('my-profile')).toBe('unknown');
   });
-  it('Given 网页版主端口 3080，When 把局域网端口设成 3080，Then 拒绝且原因是端口不可用', () => {
+  it('Given Web 主端口 3080，When 把局域网端口设成 3080，Then 拒绝且原因是端口不可用', () => {
     const result = coerceSettingsPatch({ lanPort: 3080 }, withPassword, 3080);
     expect(result).toMatchObject({ ok: false, code: ERROR_CODES.invalidPort });
   });

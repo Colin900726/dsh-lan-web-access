@@ -150,7 +150,7 @@ function sanitizeSettings(s: Settings): Record<string, unknown> {
   };
 }
 
-/** 运行环境：按 dsh profile 名判断是桌面版还是网页版。 */
+/** 运行环境：按 dsh profile 名判断是 Desktop 还是 Web。 */
 export function editionOf(profile: string): Edition {
   if (profile === 'desktop') return 'desktop';
   if (profile === 'web') return 'web';

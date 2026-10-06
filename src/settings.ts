@@ -58,7 +58,7 @@ export interface Settings {
   lanEnabled: boolean;
   /** 局域网监听 IP（空 = 未设置）。 */
   lanHost: string;
-  /** 局域网监听端口；null = 跟随 dsh 主端口 + 1（桌面版 19388、网页版 3081）。 */
+  /** 局域网监听端口；null = 跟随 dsh 主端口 + 1（Desktop 19388、Web 3081）。 */
   lanPort: number | null;
   /** 第一次有局域网设备连进来后置 true，之后不再显示防火墙提示条。 */
   lanHintDone: boolean;
@@ -114,14 +114,14 @@ export function isPortInRange(port: unknown): port is number {
 
 /**
  * 局域网入口实际用的端口：没设过就用 dsh 主端口 + 1；设过的端口如果正好等于主端口
- * （例如从桌面版带过来的设置装到了网页版），也退回主端口 + 1，不和 dsh 抢端口。
+ * （例如从 Desktop 带过来的设置装到了 Web），也退回主端口 + 1，不和 dsh 抢端口。
  */
 export function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, mainPort: number): number {
   const port = settings.lanPort ?? mainPort + 1;
   return port === mainPort ? mainPort + 1 : port;
 }
 
-/** 局域网端口是否可用：在范围内，且不等于 dsh 实际在用的主端口（桌面版 19387、网页版默认 3080，以运行时为准）。 */
+/** 局域网端口是否可用：在范围内，且不等于 dsh 实际在用的主端口（Desktop 19387、Web 默认 3080，以运行时为准）。 */
 export function isValidPort(port: unknown, mainPort: number): boolean {
   return isPortInRange(port) && port !== mainPort;
 }

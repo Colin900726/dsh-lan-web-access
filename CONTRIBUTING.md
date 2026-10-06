@@ -60,7 +60,7 @@ dsh-lan-web-access/
 
 > 插件代码分两部分，运行在两个地方：
 > - **服务端部分**：运行在 dsh 主程序里（Node.js），负责拦请求、补登录凭证、局域网入口、管理接口。由 `tsc` 从 `src/*.ts` 编译成 `lib/*.js`。
-> - **界面部分**：运行在浏览器或桌面版窗口里，就是设置页「局域网web访问」那一页。由 `tsdown` 从 `src/client/` 打包成 `lib/client.js`。
+> - **界面部分**：运行在浏览器或 Desktop 窗口里，就是设置页「局域网web访问」那一页。由 `tsdown` 从 `src/client/` 打包成 `lib/client.js`。
 >
 > 两者都由 `npm run build` 生成。`src/shared.ts` 两边共用，所以不能引用任何 Node.js 专有模块。
 
@@ -94,7 +94,7 @@ dsh-lan-web-access/
 | `access-log.ts` | 访问记录环形缓冲（最近 200 条，内存；重复被拒合并计数） |
 | **版本与自检** | |
 | `selfcheck.ts` | 五项运行检查、版本比较（semver 规则）、前四项判定安全退出 |
-| `updater.ts` | 一键更新：查最新版本 + 触发 `dsh plugin update`（桌面版自举、Windows 用 `dsh.cmd`） |
+| `updater.ts` | 一键更新：查最新版本 + 触发 `dsh plugin update`（Desktop 自举、Windows 用 `dsh.cmd`） |
 | **界面部分（`client/`）** | |
 | `client/index.tsx` | 设置页外壳：状态头、分段、提示条、「连接」分段 |
 | `client/devices-panel.tsx` | 「设备」分段与设备详情、添加设备面板 |

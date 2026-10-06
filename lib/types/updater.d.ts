@@ -7,9 +7,9 @@
  * - DSH_REMOTE_ACCESS_UPDATE_CMD：代替 `dsh plugin update` 运行的命令（交给系统 shell）。
  *
  * 更新命令：
- * - 桌面版：用 Electron 自举（`process.execPath` + app.asar 里的 cli.js），不依赖终端里装没装 dsh；
- * - 其余（网页版）：用 PATH 里的 `dsh`；Windows 上是 `dsh.cmd`，经 shell 启动。
- * 桌面版在 Windows 上的安装目录结构按 Electron 惯例同样是 resources/app.asar，待 Windows 真机确认（Q-014）。
+ * - Desktop：用 Electron 自举（`process.execPath` + app.asar 里的 cli.js），不依赖终端里装没装 dsh；
+ * - 其余（Web）：用 PATH 里的 `dsh`；Windows 上是 `dsh.cmd`，经 shell 启动。
+ * Desktop 在 Windows 上的安装目录结构按 Electron 惯例同样是 resources/app.asar，待 Windows 真机确认（Q-014）。
  */
 import type { UpdateState } from './shared.ts';
 export declare const PACKAGE_NAME = "dsh-lan-web-access";

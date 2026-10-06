@@ -33,7 +33,7 @@ export declare function listLanIps(): LanIpInfo[];
 export declare function isLocalRequest(req: IncomingMessage): boolean;
 export declare function jsonResponse(res: ServerResponse, status: number, data: object, headers?: Record<string, string | string[]>): void;
 export declare function parseJsonBody(req: IncomingMessage, maxBytes?: number): Promise<Record<string, unknown>>;
-/** 运行环境：按 dsh profile 名判断是桌面版还是网页版。 */
+/** 运行环境：按 dsh profile 名判断是 Desktop 还是 Web。 */
 export declare function editionOf(profile: string): Edition;
 /**
  * 组装 `/api/remote-access/status` 的返回内容。主服务和局域网入口都用这一个函数，
