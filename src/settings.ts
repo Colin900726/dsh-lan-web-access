@@ -76,6 +76,14 @@ export interface Settings {
   sessionMaxAgeDays: number;
   /** 会话 HMAC 签名密钥（首次启动生成）。 */
   sessionSecret: string | null;
+  /**
+   * 「本机免登录」从开变成关的时间（毫秒）；开着时为 null。关着时，本机请求凭 dsh 自己签发、
+   * 且签发时间不早于此刻的原生 cookie 也放行（Desktop 窗口每次启动用 dsh 的 token 换一张新的）；
+   * 插件在「本机免登录」开着时替浏览器签发的旧 cookie 早于此刻，不放行。
+   */
+  localLoginRequiredSince: number | null;
+  /** 「本机免登录」关着期间，插件因密码登录替本机浏览器签发的原生 cookie 指纹（不算 dsh 自己签发的）。 */
+  lockedMintedCookies: { h: string; exp: number }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -91,6 +99,8 @@ export const DEFAULT_SETTINGS: Settings = {
   whitelistBypassPassword: false,
   passwordHash: null,
   passwordSetAt: null,
+  localLoginRequiredSince: null,
+  lockedMintedCookies: [],
   sessionMaxAgeDays: 14,
   sessionSecret: null,
 };
@@ -168,5 +178,16 @@ export function normalizeSettings(raw: unknown): Settings {
       ? src.sessionMaxAgeDays
       : DEFAULT_SETTINGS.sessionMaxAgeDays,
     sessionSecret: typeof src.sessionSecret === 'string' ? src.sessionSecret : null,
+    localLoginRequiredSince:
+      typeof src.localLoginRequiredSince === 'number' ? src.localLoginRequiredSince : null,
+    lockedMintedCookies: Array.isArray(src.lockedMintedCookies)
+      ? src.lockedMintedCookies.filter(
+          (x): x is { h: string; exp: number } =>
+            typeof x === 'object' &&
+            x !== null &&
+            typeof (x as { h?: unknown }).h === 'string' &&
+            typeof (x as { exp?: unknown }).exp === 'number',
+        )
+      : [],
   };
 }

@@ -27,6 +27,8 @@ export interface GuardDeps {
     suspended?: () => boolean;
     /** 局域网入口转发时带的令牌（本进程启动时随机生成，别的进程拿不到）。 */
     gatewayToken?: string;
+    /** 「本机免登录」关着时，插件替本机浏览器签发了一条原生 cookie：记下它，以后不当作 dsh 签发的认。 */
+    recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
 }
 /**
  * 请求是否授权（插件没在接管时一律交给 dsh 自己认证）：

@@ -82,6 +82,11 @@ export function apply(ctx: Context, _config: Config): void {
   const settingsStore = new SettingsStore();
   const settings = settingsStore.get();
 
+  // 旧版本升级上来时「本机免登录」已经是关的、却没记关掉的时刻：从现在算起。
+  // 之前签发的原生 cookie 都不认，Desktop 窗口启动时会用 dsh 的 token 换一张新的。
+  if (!settings.allowLoopback && settings.localLoginRequiredSince === null)
+    settingsStore.update({ localLoginRequiredSince: Date.now(), lockedMintedCookies: [] });
+
   const sessions = new SessionManager({
     secret: settings.sessionSecret!,
     maxAgeDays: settings.sessionMaxAgeDays,
@@ -123,6 +128,13 @@ export function apply(ctx: Context, _config: Config): void {
     fault: () => criticalFailures(rt.checks).length > 0,
     update: { state: 'idle', current: version },
     gatewayToken: randomBytes(32).toString('hex'),
+    recordLockedMint: (fingerprint, expiresAt) => {
+      const now = Date.now();
+      const kept = settingsStore.get().lockedMintedCookies.filter((x) => x.exp > now);
+      settingsStore.update({
+        lockedMintedCookies: [...kept, { h: fingerprint, exp: expiresAt }].slice(-500),
+      });
+    },
     // 下面两个在局域网入口装配好之后换成真的（见「局域网入口」一段）。
     syncLan: () => Promise.resolve(undefined),
     lanState: () => ({
@@ -145,6 +157,7 @@ export function apply(ctx: Context, _config: Config): void {
     isPublicRoute,
     suspended: () => rt.fault(),
     gatewayToken: rt.gatewayToken,
+    recordLockedMint: (fingerprint, expiresAt) => rt.recordLockedMint(fingerprint, expiresAt),
   };
   // 守卫与管理 API 都交给 ctx.effect：插件卸载（停用、热重载）时撤销，再加载时重新安装，不残留、不报重复路由。
   ctx.effect(() => installGuard(guardDeps));

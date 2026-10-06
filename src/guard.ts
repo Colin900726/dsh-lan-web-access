@@ -21,6 +21,11 @@ import {
   issueNativeCookie,
   bouncePage,
   isDocumentNavigation,
+  peekSigningSecret,
+  verifyNativeCookie,
+  nativeCookieFingerprint,
+  setCookieValue,
+  NATIVE_COOKIE_MAX_AGE_SEC,
   type CredentialsLike,
 } from './native-cookie.ts';
 import { readSessionToken } from './cookies.ts';
@@ -43,6 +48,42 @@ export interface GuardDeps {
   suspended?: () => boolean;
   /** 局域网入口转发时带的令牌（本进程启动时随机生成，别的进程拿不到）。 */
   gatewayToken?: string;
+  /** 「本机免登录」关着时，插件替本机浏览器签发了一条原生 cookie：记下它，以后不当作 dsh 签发的认。 */
+  recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
+}
+
+/**
+ * 正在用 dsh 官方 token 换登录 cookie：`GET /?token=…`。Desktop 窗口每次启动都这样进来，
+ * `dsh web` 打印的链接也是这样。token 由 dsh 自己校验，这里只是不拦、不替它补签。
+ */
+function isOfficialTokenExchange(req: IncomingMessage): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  let url: URL;
+  try {
+    url = new URL(req.url ?? '/', 'http://x');
+  } catch {
+    return false;
+  }
+  return (url.pathname === '/' || url.pathname === '/index.html') && url.searchParams.has('token');
+}
+
+/**
+ * 带着 dsh 自己签发的登录 cookie：签名对、没过期、签发时间不早于「本机免登录」关掉的时刻，
+ * 且不是插件在关着期间替密码登录签发的。Desktop 窗口用的就是这种。
+ */
+function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings): boolean {
+  const authority = authorityOf(req.headers);
+  if (authority === undefined) return false;
+  const value = readNativeCookie(req.headers, authority);
+  if (value === undefined) return false;
+  const secret = peekSigningSecret(deps.getCredentials());
+  if (secret === undefined) return false;
+  const payload = verifyNativeCookie(value, secret, authority);
+  if (payload === undefined) return false;
+  if (s.localLoginRequiredSince === null || payload.issuedAt < s.localLoginRequiredSince)
+    return false;
+  const fingerprint = nativeCookieFingerprint(value);
+  return !s.lockedMintedCookies.some((x) => x.h === fingerprint);
 }
 
 /** 请求是不是本插件的局域网入口转发来的（它已经查过允许列表、来源和登录）。 */
@@ -82,8 +123,13 @@ export function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean {
   if (!active(deps)) return true;
   if (!isLoopbackAddress(req.socket?.remoteAddress)) return false;
   if (fromOwnGateway(req, deps.gatewayToken)) return true;
-  if (deps.getSettings().allowLoopback && isLoopbackHost(req.headers.host)) return true;
-  return deps.sessions.validate(readSessionToken(req) ?? '') !== undefined;
+  const s = deps.getSettings();
+  if (s.allowLoopback && isLoopbackHost(req.headers.host)) return true;
+  if (deps.sessions.validate(readSessionToken(req) ?? '') !== undefined) return true;
+  // 本机免登录关着：本机浏览器除了插件密码，也可以走 dsh 官方的 token 方式（Desktop 窗口就是这样），
+  // 「Desktop 不受这个开关影响」（用户 2026-10-05 定，2026-10-07 真机发现被拦后修）。
+  if (!isLoopbackHost(req.headers.host)) return false;
+  return isOfficialTokenExchange(req) || hasDshIssuedCookie(req, deps, s);
 }
 
 function replyJson(res: ServerResponse, status: number, data: Record<string, unknown>): void {
@@ -190,6 +236,8 @@ export function installGuard(deps: GuardDeps): () => void {
     /** 为已授权但缺原生 cookie 的 GET/HEAD 请求现场补签；接管了响应则返回 true。 */
     const settleCookie = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
       if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+      // 用 dsh 官方 token 换 cookie 的那一下交给 dsh 自己处理，不替它补签。
+      if (isOfficialTokenExchange(req)) return false;
       const authority = authorityOf(req.headers);
       if (authority === undefined || readNativeCookie(req.headers, authority) !== undefined)
         return false;
@@ -198,6 +246,11 @@ export function installGuard(deps: GuardDeps): () => void {
       const target = req.url ?? '/';
       const safe = target.startsWith('/') && !target.startsWith('//') ? target : '/';
       const cookie = issueNativeCookie(secret, authority);
+      if (!deps.getSettings().allowLoopback)
+        deps.recordLockedMint?.(
+          nativeCookieFingerprint(setCookieValue(cookie)),
+          Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
+        );
       if (isDocumentNavigation(req)) {
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',

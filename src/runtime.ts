@@ -40,4 +40,6 @@ export interface Runtime {
   update: UpdateState;
   /** 局域网入口转发时带给主服务的令牌，本次启动随机生成（见 guard.ts）。 */
   gatewayToken: string;
+  /** 「本机免登录」关着时插件替本机浏览器签发了原生 cookie：记下指纹（见 guard.ts hasDshIssuedCookie）。 */
+  recordLockedMint: (fingerprint: string, expiresAt: number) => void;
 }

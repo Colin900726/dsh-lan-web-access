@@ -24,6 +24,9 @@ import {
   issueNativeCookie,
   loadSigningSecret,
   expireNativeCookie,
+  nativeCookieFingerprint,
+  setCookieValue,
+  NATIVE_COOKIE_MAX_AGE_SEC,
 } from './native-cookie.ts';
 import { handleLoginPost, loginPageHtml, loginView, sendHtml } from './login.ts';
 import { readDshVersion } from './selfcheck.ts';
@@ -216,6 +219,12 @@ export function coerceSettingsPatch(
     if (!body.allowLoopback && current.passwordHash === null)
       return { ok: false, error: '需要先设置管理密码', code: ERROR_CODES.passwordRequired };
     patch.allowLoopback = body.allowLoopback;
+    // 从开变关：记下时刻，此前签发的原生 cookie（含插件替浏览器补签的）都不再认；
+    // 从关变开：不再需要。见 guard.ts hasDshIssuedCookie。
+    if (body.allowLoopback !== current.allowLoopback) {
+      patch.localLoginRequiredSince = body.allowLoopback ? null : Date.now();
+      patch.lockedMintedCookies = [];
+    }
   }
   if (typeof body.lanEnabled === 'boolean') {
     if (body.lanEnabled && current.passwordHash === null)
@@ -385,9 +394,14 @@ export function registerAdminApi(rt: Runtime): () => void {
           extraCookies: async () => {
             const authority = authorityOf(req.headers);
             const secret = await loadSigningSecret(getCredentials());
-            return authority !== undefined && secret !== undefined
-              ? [issueNativeCookie(secret, authority)]
-              : [];
+            if (authority === undefined || secret === undefined) return [];
+            const cookie = issueNativeCookie(secret, authority);
+            if (!settingsStore.get().allowLoopback)
+              rt.recordLockedMint(
+                nativeCookieFingerprint(setCookieValue(cookie)),
+                Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
+              );
+            return [cookie];
           },
         });
       },
@@ -541,6 +555,8 @@ export function registerAdminApi(rt: Runtime): () => void {
           sessionSecret,
           lanEnabled: false,
           allowLoopback: true,
+          localLoginRequiredSince: null,
+          lockedMintedCookies: [],
         });
         rt.ctx.logger?.info('remote-access: password cleared, lan disabled');
         jsonResponse(res, 200, { ok: true, reopenedLocal });

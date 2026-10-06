@@ -34,7 +34,7 @@ describe('R-001 本机免登录开关', () => {
 
   it('Given 已设密码，When 关「本机免登录」，Then 能关', () => {
     const result = coerceSettingsPatch({ allowLoopback: false }, withPassword, 3080);
-    expect(result).toEqual({ ok: true, patch: { allowLoopback: false } });
+    expect(result).toMatchObject({ ok: true, patch: { allowLoopback: false } });
   });
 
   it('Given 还没设管理密码，When 打开「本机免登录」，Then 照常保存（只拦关闭）', () => {

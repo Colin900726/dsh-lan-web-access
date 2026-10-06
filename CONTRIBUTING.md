@@ -110,6 +110,7 @@ dsh-lan-web-access/
 - **`trust.ts`**：「本机」要求 TCP 对端与 `Host` 头**同时为回环**，且不采信 `X-Forwarded-For` 等可伪造头。
 - **`gateway.ts`**：允许列表、来源和会话校验**必须在转发之前**完成，路径先按 URL 规则归一再判断 —— 任何漏转发都等于放进一个本机身份。
 - **`guard.ts`**：主服务上只认回环对端；局域网入口转发的请求凭本进程令牌（`x-dsh-remote-gateway`，常量时间比较）认出。公共路由（`/login`、`/api/remote-access/*`）不包装。
+- **「本机免登录」关着时 Desktop 不能被拦**：Desktop 启动时用 dsh 的 token 换 cookie（`GET /?token=…`，要求 dsh 回 303 + Set-Cookie，否则 Desktop 报 `Desktop Host authentication failed` 退出），之后凭这张 dsh 签发的 cookie 访问。`guard.ts` 因此放行官方 token 交换，并认「签发时间不早于关掉时刻、且不是插件在关着期间替密码登录签发的」dsh cookie（见 `hasDshIssuedCookie`、`tests/desktop.spec.ts`）。
 - **`native-cookie.ts`**：格式必须与上游**逐字节一致**；读不到签名密钥时**跳过补签**，让请求落回官方 token 认证（安全关闭，而非放开）。
 - **敏感操作**（改设置 / 密码 / 允许列表 / 更新 / 踢下线）只认 `isLocalRequest`：回环且不带入口令牌、Origin 完全同源、`Sec-Fetch-Site` 只能是 same-origin / none、请求体必须是 JSON。
 - **dsh 宿主的全局样式**：dsh 页面给所有元素设了 `corner-shape: superellipse(1.5)`、给 body 设了 `text-autospace: normal`，插件在 `.dla` 下改回 `round` 和 `no-autospace`，否则圆角变方、中英文之间被加空格。

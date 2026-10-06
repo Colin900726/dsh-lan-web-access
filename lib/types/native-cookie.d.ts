@@ -35,6 +35,23 @@ export declare function readNativeCookie(headers: IncomingMessage['headers'], au
  * undefined（调用方跳过本次补签、下次重试）。
  */
 export declare function loadSigningSecret(credentials: CredentialsLike | undefined): Promise<Buffer | undefined>;
+/**
+ * 已经读到过的签名密钥（不过期、不发起读取）。请求校验是同步的，用它；还没读到时顺手发起一次读取，
+ * 下一个请求就能用上。读不到就返回 undefined，调用方按「不认」处理（安全关闭）。
+ */
+export declare function peekSigningSecret(credentials: CredentialsLike | undefined): Buffer | undefined;
+/**
+ * 校验一条原生 cookie 值：签名对、authority 对得上、没过期，返回其 payload；否则 undefined。
+ * 和 dsh 自己的校验规则一致（见文件头的协议要点）。
+ */
+export declare function verifyNativeCookie(value: string, secret: Buffer, authority: string, now?: number): {
+    issuedAt: number;
+    expiresAt: number;
+} | undefined;
+/** cookie 值的指纹（记「插件签发过哪些」时只存它，不存 cookie 本身）。 */
+export declare function nativeCookieFingerprint(value: string): string;
+/** 从 `Set-Cookie` 串里取出 cookie 值。 */
+export declare function setCookieValue(setCookie: string): string;
 /** 序列化原生 cookie 值（`v1.<payload>.<hmac>`）。 */
 export declare function serializeNativeCookie(payload: {
     version: number;
