@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-web-access",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness（dsh）局域网 Web 访问插件：局域网 / 异地组网里多台设备同时访问同一台 dsh；允许列表 + 管理密码，本机与 SSH 隧道免 token，适配桌面版与 Web 版。",
   "type": "module",
   "main": "lib/index.js",

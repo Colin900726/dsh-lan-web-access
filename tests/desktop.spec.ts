@@ -150,6 +150,39 @@ describe('本机免登录关着：Desktop 不受影响（Q-005）', () => {
   });
 });
 
+describe('真 dsh 里的 credentials 是 cordis 代理：每次拿到的都是新包的一层', () => {
+  it('Given 每次 getCredentials 都返回新的代理对象，Then 同步校验仍能用上已读到的密钥（2026-10-07 Desktop 真机踩到）', async () => {
+    const raw = {
+      readRecord: () =>
+        Promise.resolve({
+          kind: 'grant',
+          payload: { version: 1, secret: secret.toString('base64url') },
+        }),
+    };
+    const proxy = () =>
+      new Proxy(raw, {
+        get: (t, k) => (k === Symbol.for('cordis.original') ? t : Reflect.get(t, k)),
+      }) as unknown as CredentialsLike;
+    await loadSigningSecret(proxy());
+    const d = { ...deps, getCredentials: proxy };
+    expect(isAuthorized(req({ cookie: cookieAt(Date.now()).header }), d)).toBe(true);
+  });
+
+  it('Given 每次都是全新的普通对象（拿不到原对象），Then 也能用上最近读到的密钥', async () => {
+    const fresh = () =>
+      ({
+        readRecord: () =>
+          Promise.resolve({
+            kind: 'grant',
+            payload: { version: 1, secret: secret.toString('base64url') },
+          }),
+      }) as CredentialsLike;
+    await loadSigningSecret(fresh());
+    const d = { ...deps, getCredentials: fresh };
+    expect(isAuthorized(req({ cookie: cookieAt(Date.now()).header }), d)).toBe(true);
+  });
+});
+
 describe('「本机免登录」开关切换时记下时刻', () => {
   it('Given 从开变关，Then 记下关掉的时刻、清空插件签发记录；从关变开，Then 清掉', () => {
     const on = { ...DEFAULT_SETTINGS, passwordHash: 'salt:hash', allowLoopback: true };

@@ -15,6 +15,7 @@
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { rawService } from './cordis-raw.ts';
 import { credentialKey } from '@deepseek-ai/dsh-credentials';
 
 export const NATIVE_COOKIE_PREFIX = 'dsh-auth-';
@@ -71,6 +72,12 @@ export function readNativeCookie(
  * 只缓存一分钟：dsh 运行中换了密钥，一分钟内就会读到新的；运行检查第 2 项也会跟着反映真实情况。
  */
 const secretCache = new WeakMap<object, { secret: Buffer; at: number }>();
+/**
+ * 最近一次读到的密钥。经 ctx 拿到的 credentials 是 cordis 代理，每次拿都可能是新包的一层，
+ * 按代理当键永远找不到（2026-10-07 Desktop 真机踩到：同步校验时总是「还没读到」）。缓存改按原对象当键，
+ * 另外记一份最近读到的：一个进程只有一份 dsh 签名密钥。
+ */
+let latestSecret: Buffer | undefined;
 const SECRET_CACHE_MS = 60_000;
 
 /**
@@ -81,7 +88,7 @@ export async function loadSigningSecret(
   credentials: CredentialsLike | undefined,
 ): Promise<Buffer | undefined> {
   if (credentials === undefined) return undefined;
-  const cached = secretCache.get(credentials);
+  const cached = secretCache.get(rawService(credentials));
   if (cached !== undefined && Date.now() - cached.at < SECRET_CACHE_MS) return cached.secret;
   try {
     const record = (await credentials.readRecord(SIGNING_SECRET_RECORD)) as
@@ -94,7 +101,8 @@ export async function loadSigningSecret(
       return undefined;
     const secret = Buffer.from(payload.secret, 'base64url');
     if (secret.length !== SIGNING_SECRET_BYTES) return undefined;
-    secretCache.set(credentials, { secret, at: Date.now() });
+    secretCache.set(rawService(credentials), { secret, at: Date.now() });
+    latestSecret = secret;
     return secret;
   } catch {
     return undefined;
@@ -107,9 +115,9 @@ export async function loadSigningSecret(
  */
 export function peekSigningSecret(credentials: CredentialsLike | undefined): Buffer | undefined {
   if (credentials === undefined) return undefined;
-  const cached = secretCache.get(credentials);
-  if (cached === undefined) void loadSigningSecret(credentials);
-  return cached?.secret;
+  const secret = secretCache.get(rawService(credentials))?.secret ?? latestSecret;
+  if (secret === undefined) void loadSigningSecret(credentials);
+  return secret;
 }
 
 /**
@@ -138,7 +146,10 @@ export function verifyNativeCookie(
     return undefined;
   if (typeof payload.issuedAt !== 'number' || typeof payload.expiresAt !== 'number')
     return undefined;
-  if (payload.expiresAt <= now) return undefined;
+  // 与 dsh 自己的校验一致：签发不晚于现在、没过期、有效期不超过 30 天。
+  if (payload.issuedAt > now || payload.expiresAt <= now) return undefined;
+  if (payload.expiresAt <= payload.issuedAt) return undefined;
+  if (payload.expiresAt - payload.issuedAt > NATIVE_COOKIE_MAX_AGE_SEC * 1000) return undefined;
   return { issuedAt: payload.issuedAt, expiresAt: payload.expiresAt };
 }
 
