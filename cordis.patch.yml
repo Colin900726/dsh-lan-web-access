@@ -1,0 +1,8 @@
+# dsh-lan-web-access bundle patch.
+#
+# 只插入一行本插件，不禁用、不覆盖任何官方行（startup / connection / webserver
+# 等一律不碰）。name 必须是包名本身，这样 ClientModuleRegistry 才能解析到
+# package.json 的 dsh.client 声明，进而把 lib/client.js（设置页标签）注入前端。
+- insert:
+    - id: dsh-lan-web-access
+      name: dsh-lan-web-access

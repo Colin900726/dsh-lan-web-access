@@ -1,0 +1,7 @@
+# 仅用于安装阶段声明：本插件构建/测试不依赖这些原生模块，禁止其执行安装脚本。
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': false
+  '@google/genai': false
+  koffi: false
+  node-pty: false
+  protobufjs: false
