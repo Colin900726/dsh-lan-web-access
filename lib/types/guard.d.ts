@@ -40,6 +40,12 @@ export interface GuardDeps {
  */
 export declare function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean;
 /**
+ * isAuthorized 的异步版：本机请求带着原生 cookie、而签名密钥还没读进内存时（插件刚启动，
+ * Desktop 窗口第一个请求就是这样），先等密钥读完再判一次。2026-10-07 Desktop 真机踩到：
+ * 同步判断时密钥还没读，Desktop 启动被拦。
+ */
+export declare function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
+/**
  * 安装守卫，返回撤销函数：撤销 index 注入、还原 webServer 的注册方法、把被包装过的
  * 路由与 fallback 换回原处理器。插件卸载（停用、热重载）时调用，之后可再次安装。
  */

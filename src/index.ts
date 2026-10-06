@@ -18,7 +18,7 @@ import { SettingsStore } from './settings-store.ts';
 import { SessionManager } from './session-store.ts';
 import { createRateLimiter } from './ratelimit.ts';
 import { AccessLog } from './access-log.ts';
-import { installGuard, isAuthorized, type GuardDeps, type LoggerLike } from './guard.ts';
+import { installGuard, isAuthorizedAsync, type GuardDeps, type LoggerLike } from './guard.ts';
 import { registerAdminApi, jsonResponse } from './admin-api.ts';
 import { createGateway, whitelistAllows, type GatewayHandle } from './gateway.ts';
 import { effectiveLanPort } from './settings.ts';
@@ -27,7 +27,7 @@ import { listLanIps } from './admin-api.ts';
 import type { LanState } from './shared.ts';
 import { criticalFailures, readDshVersion, runSelfCheck } from './selfcheck.ts';
 import type { Runtime } from './runtime.ts';
-import type { CredentialsLike } from './native-cookie.ts';
+import { loadSigningSecret, type CredentialsLike } from './native-cookie.ts';
 
 export const name = 'dsh-lan-web-access';
 export const inject = ['webServer'];
@@ -147,7 +147,7 @@ export function apply(ctx: Context, _config: Config): void {
     }),
   };
 
-  // 组装守卫依赖（isAuthorized 供 connection/request 闸门复用）。
+  // 组装守卫依赖（isAuthorized / isAuthorizedAsync 供 connection/request 闸门复用）。
   const guardDeps: GuardDeps = {
     webServer,
     getSettings: () => settingsStore.get(),
@@ -161,13 +161,15 @@ export function apply(ctx: Context, _config: Config): void {
   };
   // 守卫与管理 API 都交给 ctx.effect：插件卸载（停用、热重载）时撤销，再加载时重新安装，不残留、不报重复路由。
   ctx.effect(() => installGuard(guardDeps));
+  // 启动时就把 dsh 的签名密钥读进来，「本机免登录」关着时 Desktop 窗口的第一个请求就能校验。
+  void loadSigningSecret(getCredentials());
 
   // 管理/认证 API。
   ctx.effect(() => registerAdminApi(rt));
 
   // 共享 API 会话闸门（官方 connection/request waterfall，主防线）。
   ctx.on('connection/request', async (request, response, next) => {
-    if (!isAuthorized(request, guardDeps)) {
+    if (!(await isAuthorizedAsync(request, guardDeps))) {
       jsonResponse(response, 401, { error: 'unauthorized' });
       return;
     }

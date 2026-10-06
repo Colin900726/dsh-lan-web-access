@@ -129,7 +129,30 @@ export function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean {
   // 本机免登录关着：本机浏览器除了插件密码，也可以走 dsh 官方的 token 方式（Desktop 窗口就是这样），
   // 「Desktop 不受这个开关影响」（用户 2026-10-05 定，2026-10-07 真机发现被拦后修）。
   if (!isLoopbackHost(req.headers.host)) return false;
-  return isOfficialTokenExchange(req) || hasDshIssuedCookie(req, deps, s);
+  if (isOfficialTokenExchange(req)) {
+    // dsh 收下 token 后马上会签发 cookie，紧接着的请求就要用签名密钥校验：现在就开始读。
+    peekSigningSecret(deps.getCredentials());
+    return true;
+  }
+  return hasDshIssuedCookie(req, deps, s);
+}
+
+/**
+ * isAuthorized 的异步版：本机请求带着原生 cookie、而签名密钥还没读进内存时（插件刚启动，
+ * Desktop 窗口第一个请求就是这样），先等密钥读完再判一次。2026-10-07 Desktop 真机踩到：
+ * 同步判断时密钥还没读，Desktop 启动被拦。
+ */
+export async function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean> {
+  if (isAuthorized(req, deps)) return true;
+  if (!isLoopbackAddress(req.socket?.remoteAddress) || !isLoopbackHost(req.headers.host))
+    return false;
+  const authority = authorityOf(req.headers);
+  if (authority === undefined || readNativeCookie(req.headers, authority) === undefined)
+    return false;
+  const credentials = deps.getCredentials();
+  if (credentials === undefined || peekSigningSecret(credentials) !== undefined) return false;
+  if ((await loadSigningSecret(credentials)) === undefined) return false;
+  return isAuthorized(req, deps);
 }
 
 function replyJson(res: ServerResponse, status: number, data: Record<string, unknown>): void {
@@ -268,7 +291,7 @@ export function installGuard(deps: GuardDeps): () => void {
     const guardHandler =
       (handler: WebRoute['handler']) =>
       async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-        if (!isAuthorized(req, deps)) {
+        if (!(await isAuthorizedAsync(req, deps))) {
           if ((req.method === 'GET' || req.method === 'HEAD') && isDocumentNavigation(req)) {
             res.writeHead(302, { location: '/login', 'cache-control': 'no-store' });
             res.end();
@@ -320,11 +343,20 @@ export function installGuard(deps: GuardDeps): () => void {
       guardedUpgrades.add(route);
       const original = route.handler;
       const wrapped: WebUpgradeRoute['handler'] = (req, socket, head) => {
-        if (!isAuthorized(req, deps)) {
-          socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
-          return;
-        }
-        return original(req, socket, head);
+        if (isAuthorized(req, deps)) return original(req, socket, head);
+        // 密钥还没读到时等一下再判（见 isAuthorizedAsync）；等待期间先暂停读取，免得丢数据。
+        socket.pause();
+        void isAuthorizedAsync(req, deps).then(
+          (ok) => {
+            if (!ok) {
+              socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n');
+              return;
+            }
+            socket.resume();
+            return original(req, socket, head);
+          },
+          () => socket.destroy(),
+        );
       };
       route.handler = wrapped;
       restores.push(() => {
