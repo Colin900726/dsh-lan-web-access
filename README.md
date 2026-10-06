@@ -28,11 +28,32 @@
 
 设置页（设置 → 局域网web访问）为苹果风格，分四段：**连接 / 设备 / 安全 / 关于**；局域网登录页为独立网页，五种状态。
 
-<!-- 截图占位：截图放进 docs/screenshots/（文件名见下），再取消这段注释
-![设置页 · 连接](docs/screenshots/settings-connection.png)
-![设置页 · 设备](docs/screenshots/settings-devices.png)
-![局域网登录页](docs/screenshots/login.png)
--->
+**设置页**
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/settings-connection.png" width="400" alt="设置页 · 连接"><br>连接</td>
+    <td align="center"><img src="docs/screenshots/settings-devices.png" width="400" alt="设置页 · 设备"><br>设备</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/settings-security.png" width="400" alt="设置页 · 安全"><br>安全</td>
+    <td align="center"><img src="docs/screenshots/settings-about.png" width="400" alt="设置页 · 关于"><br>关于</td>
+  </tr>
+</table>
+
+**局域网登录页**
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/login.png" width="160" alt="登录页 · 正常"><br>正常</td>
+    <td align="center"><img src="docs/screenshots/login-wrong-password.png" width="160" alt="登录页 · 密码错误"><br>密码错误</td>
+    <td align="center"><img src="docs/screenshots/login-locked.png" width="160" alt="登录页 · 错太多次"><br>错太多次</td>
+    <td align="center"><img src="docs/screenshots/login-not-allowed.png" width="160" alt="登录页 · 设备不在列表"><br>设备不在列表</td>
+    <td align="center"><img src="docs/screenshots/login-not-ready.png" width="160" alt="登录页 · dsh 还没准备好"><br>dsh 还没准备好</td>
+  </tr>
+</table>
+
+> 截图里的 IP、设备名、电脑名均为示例数据。
 
 ## 安装
 
