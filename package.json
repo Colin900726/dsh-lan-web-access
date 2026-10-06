@@ -1,7 +1,7 @@
 {
   "name": "dsh-lan-web-access",
   "version": "0.1.0",
-  "description": "DSH 远程访问插件：本机/SSH 隧道免 token、可选局域网模式（允许列表 + 管理密码），适配 Desktop 与 WebUI 双端。",
+  "description": "DeepSeek Harness（dsh）局域网 Web 访问插件：局域网 / 异地组网里多台设备同时访问同一台 dsh；允许列表 + 管理密码，本机与 SSH 隧道免 token，适配桌面版与 Web 版。",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -74,6 +74,22 @@
         "@deepseek-ai/dsh-client-ui-settings"
       ]
     }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "lan",
+    "remote-access",
+    "tailscale"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Colin900726/dsh-lan-web-access.git"
+  },
+  "homepage": "https://github.com/Colin900726/dsh-lan-web-access#readme",
+  "bugs": {
+    "url": "https://github.com/Colin900726/dsh-lan-web-access/issues"
   },
   "author": "Colin",
   "license": "MIT"

@@ -63,13 +63,13 @@
 
 ```sh
 # 桌面版
-dsh plugin --profile desktop add github:<你的GitHub用户名>/dsh-lan-web-access
+dsh plugin --profile desktop add github:Colin900726/dsh-lan-web-access
 
 # 网页版（dsh web）
-dsh plugin --profile web add github:<你的GitHub用户名>/dsh-lan-web-access
+dsh plugin --profile web add github:Colin900726/dsh-lan-web-access
 
 # 指定某个版本（标签）
-dsh plugin --profile web add github:<你的GitHub用户名>/dsh-lan-web-access#v0.1.0
+dsh plugin --profile web add github:Colin900726/dsh-lan-web-access#v0.1.0
 ```
 
 **从 npm 安装**（发布到 npm 之后可用）：
