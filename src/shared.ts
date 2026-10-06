@@ -1,5 +1,5 @@
 /**
- * 前后端共用的常量与类型。浏览器半（src/client）也引用它，所以这里不能 import 任何 node 模块。
+ * 前后端共用的常量与类型。界面部分（src/client）也引用它，所以这里不能 import 任何 node 模块。
  * 后端只返回错误码，界面上的话由前端文案表（src/client/strings.ts）按码给出。
  */
 

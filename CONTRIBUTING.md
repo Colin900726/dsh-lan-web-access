@@ -42,23 +42,27 @@ GitHub Actions 每次推送都会重新编译一遍并对比：仓库里的 `lib
 ```
 dsh-lan-web-access/
 ├── src/                        源码（唯一需要手改的地方）
-│   └── client/                 设置页（浏览器半）
+│   └── client/                 设置页界面（界面部分）
 ├── lib/                        构建产物（提交在仓库里，供直接从 GitHub 安装；npm 包里也带它）
-│   ├── *.js                    tsc 产出 —— node 半
+│   ├── *.js                    tsc 产出 —— 服务端部分
 │   ├── types/**                tsc 类型声明
-│   └── client.js (+.map)       tsdown 产出 —— 浏览器半，注册进 window.__ModuleLoader__
+│   └── client.js (+.map)       tsdown 产出 —— 界面部分，注册进 window.__ModuleLoader__
 ├── tests/                      vitest 单元测试（16 个 spec / 146 个用例）
 ├── .github/workflows/ci.yml    推送时自动检查：测试、编译、lib/ 与源码一致
 ├── cordis.patch.yml            宿主把本插件插进 Cordis 树的那一行（运行时必需）
-├── tsconfig.json               node 半 + 类型声明构建
-├── tsdown.config.ts            浏览器半 bundle 构建
+├── tsconfig.json               服务端部分 + 类型声明的编译设置
+├── tsdown.config.ts            界面部分的打包设置
 ├── eslint.config.js            代码检查
 ├── .prettierrc.json            格式化规则
 ├── pnpm-workspace.yaml         pnpm 安装设置（禁用若干原生模块的安装脚本）
 └── package.json                双入口：main = lib/index.js，exports["./client"] = lib/client.js
 ```
 
-> `lib/` 里同时有两种产物：**node 半**由 `tsc` 从 `src/*.ts` 编译，**浏览器半**由 `tsdown` 从 `src/client/index.tsx` 打包。两者都由 `npm run build` 生成。`src/shared.ts` 两边共用，所以不能引用任何 node 模块。
+> 插件代码分两部分，运行在两个地方：
+> - **服务端部分**：运行在 dsh 主程序里（Node.js），负责拦请求、补登录凭证、局域网入口、管理接口。由 `tsc` 从 `src/*.ts` 编译成 `lib/*.js`。
+> - **界面部分**：运行在浏览器或桌面版窗口里，就是设置页「局域网web访问」那一页。由 `tsdown` 从 `src/client/` 打包成 `lib/client.js`。
+>
+> 两者都由 `npm run build` 生成。`src/shared.ts` 两边共用，所以不能引用任何 Node.js 专有模块。
 
 ### 模块职责
 
@@ -91,7 +95,7 @@ dsh-lan-web-access/
 | **版本与自检** | |
 | `selfcheck.ts` | 五项运行检查、版本比较（semver 规则）、前四项判定安全退出 |
 | `updater.ts` | 一键更新：查最新版本 + 触发 `dsh plugin update`（桌面版自举、Windows 用 `dsh.cmd`） |
-| **浏览器半（`client/`）** | |
+| **界面部分（`client/`）** | |
 | `client/index.tsx` | 设置页外壳：状态头、分段、提示条、「连接」分段 |
 | `client/devices-panel.tsx` | 「设备」分段与设备详情、添加设备面板 |
 | `client/security-panel.tsx` | 「安全」分段：管理密码、登录保持、访问记录 |
