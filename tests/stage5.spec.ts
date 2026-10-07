@@ -13,7 +13,7 @@ import { addMintRecord, MAX_MINTED } from '../src/settings.ts';
 import { hashPassword, makeSalt } from '../src/session-store.ts';
 import { dshVersionInRange } from '../src/selfcheck.ts';
 import { checkLatestVersion, runUpdate, UPDATE_SOURCES } from '../src/updater.ts';
-import { dshCookie, fakeCredentials } from './helpers.ts';
+import { dshCookie, fakeCredentials, nodeCmd } from './helpers.ts';
 
 let dir: string;
 beforeEach(() => {
@@ -376,7 +376,7 @@ describe('R-007 一键更新', () => {
   ] as const) {
     it(`Given ${profile} 上更新失败，Then ${hasCommand ? '给终端手动命令' : '不给终端命令（界面指引去「插件」页）'}`, async () => {
       answer = { status: 200, body: { version: '9.9.9' } };
-      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'echo boom; exit 1';
+      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = nodeCmd("console.log('boom');process.exit(1)");
       const p = boot(profile);
       const route = p.routes.get('/api/remote-access/update')!;
       await call(route);
@@ -404,7 +404,11 @@ describe('R-007 一键更新', () => {
   it('Given npm 官方源和国内镜像都连不上、GitHub 能装上，Then 用 GitHub 装上，回报成功（来源不锁死一种）', async () => {
     const counter = join(dir, 'n');
     // 第 1、2 次（npm、镜像）断网，第 3 次（GitHub）成功
-    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; if [ "$n" -ge 2 ]; then exit 0; else echo ECONNRESET; exit 1; fi`;
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = nodeCmd(
+      "const fs=require('fs');const f=process.argv[1];let n=0;try{n=Number(fs.readFileSync(f,'utf8'))}catch{}" +
+        "fs.writeFileSync(f,String(n+1));if(n>=2)process.exit(0);console.log('ECONNRESET');process.exit(1)",
+      counter,
+    );
     const r = await runUpdate('web', '9.9.9', {
       verify: true,
       readInstalled: () => '9.9.9',
@@ -415,13 +419,14 @@ describe('R-007 一键更新', () => {
     expect(r.output).toContain('[GitHub]');
   });
   it('Given 三个来源都断网，Then 回报 network', async () => {
-    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'echo ECONNRESET; exit 1';
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = nodeCmd("console.log('ECONNRESET');process.exit(1)");
     const r = await runUpdate('web', '9.9.9', { sources: UPDATE_SOURCES });
     expect(r).toMatchObject({ ok: false, reason: 'network' });
   });
   it('Given 更新时断网，Then 回报 network', async () => {
-    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD =
-      'echo getaddrinfo ENOTFOUND registry.npmjs.org; exit 1';
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = nodeCmd(
+      "console.log('getaddrinfo ENOTFOUND registry.npmjs.org');process.exit(1)",
+    );
     expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: false, reason: 'network' });
   });
   it('Given 打开「关于」有新版本，When 点更新，Then 状态变「完成」、设置不变、记一笔插件更新', async () => {
@@ -443,8 +448,8 @@ describe('R-007 一键更新', () => {
   });
   for (const [cmd, reason] of [
     ['exit 127', 'no-command'],
-    ['echo getaddrinfo ENOTFOUND registry.npmjs.org; exit 1', 'network'],
-    ['echo boom; exit 1', 'failed'],
+    [nodeCmd("console.log('getaddrinfo ENOTFOUND registry.npmjs.org');process.exit(1)"), 'network'],
+    [nodeCmd("console.log('boom');process.exit(1)"), 'failed'],
   ] as const) {
     it(`Given 更新失败（${reason}），Then 状态「失败」带原因和手动命令、记一笔、设置不变，再点能重试`, async () => {
       answer = { status: 200, body: { version: '9.9.9' } };
@@ -566,15 +571,21 @@ describe('插件签发记录经过设置文件读写，也不超过上限', () =
 });
 
 describe('一键更新超时', () => {
-  it('Given 更新命令卡住（还起了子进程），When 超时，Then 整棵进程树都被杀掉，按网络问题回报', async () => {
-    const marker = `dsh-upd-timeout-${process.pid}-${Date.now()}`;
-    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `bash -c 'exec -a ${marker} sleep 60' & wait`;
-    const r = await runUpdate('web', '9.9.9', { timeoutMs: 500, sources: ['npm'] });
-    expect(r).toMatchObject({ ok: false, reason: 'network' });
-    const { execSync } = await import('node:child_process');
-    const left = execSync(`ps -ax -o command= | grep -c '[${marker[0]}]${marker.slice(1)}' || true`)
-      .toString()
-      .trim();
-    expect(left).toBe('0');
-  });
+  // 靠 macOS / Linux 的进程组和 ps 检查；Windows 走 taskkill，这里不测。
+  it.skipIf(process.platform === 'win32')(
+    'Given 更新命令卡住（还起了子进程），When 超时，Then 整棵进程树都被杀掉，按网络问题回报',
+    async () => {
+      const marker = `dsh-upd-timeout-${process.pid}-${Date.now()}`;
+      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `bash -c 'exec -a ${marker} sleep 60' & wait`;
+      const r = await runUpdate('web', '9.9.9', { timeoutMs: 500, sources: ['npm'] });
+      expect(r).toMatchObject({ ok: false, reason: 'network' });
+      const { execSync } = await import('node:child_process');
+      const left = execSync(
+        `ps -ax -o command= | grep -c '[${marker[0]}]${marker.slice(1)}' || true`,
+      )
+        .toString()
+        .trim();
+      expect(left).toBe('0');
+    },
+  );
 });
