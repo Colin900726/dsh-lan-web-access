@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { request as httpRequest } from 'node:http';
-import { createServer } from 'node:net';
+import { createServer as createHttpServer, request as httpRequest } from 'node:http';
+import { createServer, type Socket } from 'node:net';
 import { checkSameOrigin, isAllowedHostName } from '../src/origin-guard.ts';
 import { buildDevicesView, describeUserAgent, recentDenied } from '../src/devices.ts';
 import { createGateway, whitelistAllows } from '../src/gateway.ts';
@@ -13,6 +13,7 @@ import { createRateLimiter } from '../src/ratelimit.ts';
 import { AccessLog } from '../src/access-log.ts';
 import { DEFAULT_SETTINGS, type AccessLogEntry } from '../src/settings.ts';
 import type { Runtime } from '../src/runtime.ts';
+import { fakeCredentials } from './helpers.ts';
 
 let dir: string;
 beforeEach(() => {
@@ -295,5 +296,106 @@ describe('R-019 / R-011 移出列表、退出登录', () => {
     sessions.kickAll();
     expect(sessions.list()).toHaveLength(0);
     expect(revoked[0]).toHaveLength(2);
+  });
+});
+
+describe('局域网入口转发时的 dsh cookie 处理', () => {
+  /** 起一个假 dsh（记下收到的 cookie，回一条 dsh cookie 和一条普通 cookie）和一个真入口。 */
+  async function setup() {
+    const store = new SettingsStore();
+    store.update({
+      whitelist: [{ id: 'me', name: '本机', value: '127.0.0.1' }],
+      whitelistBypassPassword: true,
+    });
+    const seen: string[] = [];
+    const dsh = createHttpServer((req, res) => {
+      seen.push(String(req.headers.cookie ?? ''));
+      res.writeHead(200, { 'set-cookie': ['dsh-auth-x=from-dsh; Path=/', 'keep=1; Path=/'] });
+      res.end('ok');
+    });
+    const upgradedSockets: Socket[] = [];
+    dsh.on('upgrade', (req, socket) => {
+      upgradedSockets.push(socket as Socket);
+      seen.push(String(req.headers.cookie ?? ''));
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          'Set-Cookie: dsh-auth-x=from-dsh; Path=/\r\nSet-Cookie: keep=1; Path=/\r\n\r\n',
+      );
+    });
+    await new Promise<void>((r) => dsh.listen(0, '127.0.0.1', () => r()));
+    const rt = {
+      settingsStore: store,
+      sessions: new SessionManager({ secret: 's', maxAgeDays: 14 }),
+      rateLimiter: createRateLimiter(),
+      getCredentials: fakeCredentials,
+      log: new AccessLog(10),
+      webServer: { port: (dsh.address() as { port: number }).port },
+      version: '0.1.0',
+      profile: 'web',
+      gatewayToken: 'tok',
+      lastSeenByIp: new Map(),
+      lanState: () => ({}),
+    } as unknown as Runtime;
+    const gw = createGateway(rt);
+    const port = await new Promise<number>((r) => {
+      const s = createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const p = (s.address() as { port: number }).port;
+        s.close(() => r(p));
+      });
+    });
+    await gw.start('127.0.0.1', port);
+    const close = async () => {
+      await gw.stop();
+      // 升级后的连接不会自己断，关假 dsh 前先断掉，不然 close 一直等。
+      for (const s of upgradedSockets) s.destroy();
+      await new Promise<void>((r) => dsh.close(() => r()));
+    };
+    return { port, seen, close };
+  }
+
+  it('Given 设备自己带了一张 dsh cookie，When 转发给 dsh，Then 只剩入口给的那一张，设备的其他 cookie 照带', async () => {
+    const { port, seen, close } = await setup();
+    const setCookie = await new Promise<string[]>((resolve) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port, path: '/x', headers: { cookie: 'dsh-auth-x=junk; other=1' } },
+        (res) => {
+          res.resume();
+          resolve((res.headers['set-cookie'] ?? []) as string[]);
+        },
+      );
+      req.end();
+    });
+    const sent = seen[0]!.split(';').map((c) => c.trim());
+    expect(sent.filter((c) => c.startsWith('dsh-auth-'))).toHaveLength(1);
+    expect(sent).not.toContain('dsh-auth-x=junk');
+    expect(sent).toContain('other=1');
+    // dsh 的 cookie 不发给设备，普通 cookie 照发
+    expect(setCookie.some((c) => c.startsWith('dsh-auth-'))).toBe(false);
+    expect(setCookie.some((c) => c.startsWith('keep=1'))).toBe(true);
+    await close();
+  });
+
+  it('Given WebSocket 握手，When dsh 回的 101 里带 dsh cookie，Then 设备收到的 101 里没有它', async () => {
+    const { port, close } = await setup();
+    const headers = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const req = httpRequest({
+        host: '127.0.0.1',
+        port,
+        path: '/ws',
+        headers: { connection: 'Upgrade', upgrade: 'websocket' },
+      });
+      req.on('upgrade', (res, socket) => {
+        socket.destroy();
+        resolve(res.headers);
+      });
+      req.on('response', (res) => reject(new Error(`没升级，状态码 ${res.statusCode}`)));
+      req.on('error', reject);
+      req.end();
+    });
+    const cookies = ([] as string[]).concat((headers['set-cookie'] as string[] | undefined) ?? []);
+    expect(cookies.some((c) => c.startsWith('dsh-auth-'))).toBe(false);
+    expect(cookies.some((c) => c.startsWith('keep=1'))).toBe(true);
+    await close();
   });
 });
