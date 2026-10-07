@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { homedir } from 'node:os';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { resolveUpdateCommand, manualUpdateCommand } from '../src/updater.ts';
+import { pathToFileURL } from 'node:url';
+import {
+  resolveUpdateCommand,
+  manualUpdateCommand,
+  pruneReleaseAgeExclusions,
+} from '../src/updater.ts';
 import { dshHome } from '../src/settings-store.ts';
 import { resolveComputerName } from '../src/machine-name.ts';
 
@@ -130,5 +136,32 @@ describe('R-022 / R-009 访问地址挑哪块网卡', () => {
     const { pickLanAddress } = await import('../src/client/lan-address.ts');
     expect(pickLanAddress([{ name: 'Tailscale', address: '100.101.1.2' }])).toBe('100.101.1.2');
     expect(pickLanAddress([])).toBeUndefined();
+  });
+});
+
+describe('R-007 删了重装不掉回旧版：清掉 pnpm 冷静期放行名单里的旧条目', () => {
+  const yaml = (entries: string[]) =>
+    `packages:\n  - .\n\nnodeLinker: hoisted\nminimumReleaseAgeExclude:\n${entries.map((e) => `  - ${e}\n`).join('')}`;
+  it('Given 名单是「0.1.4、0.1.5、别的包」，When 当前是 0.1.6 且名单里已有 0.1.6，Then 只留本插件 0.1.6 和别的包', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-prune-'));
+    const file = pathToFileURL(join(dir, 'pnpm-workspace.yaml'));
+    writeFileSync(
+      file,
+      yaml([
+        'dsh-lan-web-access@0.1.4',
+        'other-plugin@1.0.0',
+        "'dsh-lan-web-access@0.1.5'",
+        'dsh-lan-web-access@0.1.6',
+      ]),
+    );
+    expect(pruneReleaseAgeExclusions('0.1.6', file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      yaml(['other-plugin@1.0.0', 'dsh-lan-web-access@0.1.6']),
+    );
+    expect(pruneReleaseAgeExclusions('0.1.6', file)).toBe(false);
+  });
+  it('Given 设置文件不存在，Then 不报错、什么都不改', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-prune-'));
+    expect(pruneReleaseAgeExclusions('0.1.6', pathToFileURL(join(dir, 'none.yaml')))).toBe(false);
   });
 });

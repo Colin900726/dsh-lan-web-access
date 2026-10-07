@@ -21,7 +21,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { compareVersions } from './selfcheck.ts';
 import type { UpdateState } from './shared.ts';
@@ -244,4 +244,44 @@ export async function runUpdate(
     if (!NETWORK_ERROR.test(r.output)) networkOnly = false;
   }
   return { ok: false, reason: networkOnly ? 'network' : 'failed', output: log };
+}
+
+/** 本插件装在 `<profile>/node_modules/dsh-lan-web-access/`：profile 里 pnpm 的设置文件。 */
+function profileWorkspaceFile(): URL {
+  return new URL('../../../pnpm-workspace.yaml', import.meta.url);
+}
+
+const EXCLUDE_ENTRY = /^\s*-\s*['"]?dsh-lan-web-access@([^'"\s]+)['"]?\s*$/;
+
+/**
+ * 清掉 pnpm「新版本冷静期放行名单」（`minimumReleaseAgeExclude`）里本插件的旧版本条目，只留 `keep`。
+ *
+ * dsh 内置的 pnpm 11.7 只认名单里本包的第一条：名单是「0.1.4、0.1.5」时，删掉插件再只填包名重装，
+ * 装上的是 0.1.4 —— 删了重装也回不到新版本（2026-10-07 Mac / Windows 真机踩到，逐项对比确认）。
+ * 每装一个确切版本 pnpm 就往名单末尾加一条，旧条目越积越多。只改本插件的条目，别的不动；
+ * 文件不存在、读写失败都当没事（返回 false）。
+ * @returns 有没有改动文件
+ */
+export function pruneReleaseAgeExclusions(
+  keep: string,
+  file: URL = profileWorkspaceFile(),
+): boolean {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return false;
+  }
+  const lines = text.split('\n');
+  const kept = lines.filter((line) => {
+    const m = EXCLUDE_ENTRY.exec(line);
+    return m === null || m[1] === keep;
+  });
+  if (kept.length === lines.length) return false;
+  try {
+    writeFileSync(file, kept.join('\n'));
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -62,4 +62,14 @@ export declare function runUpdate(profile: string, version: string, options?: {
     readInstalled?: () => string | undefined;
     sources?: readonly UpdateSource[];
 }): Promise<UpdateResult>;
+/**
+ * 清掉 pnpm「新版本冷静期放行名单」（`minimumReleaseAgeExclude`）里本插件的旧版本条目，只留 `keep`。
+ *
+ * dsh 内置的 pnpm 11.7 只认名单里本包的第一条：名单是「0.1.4、0.1.5」时，删掉插件再只填包名重装，
+ * 装上的是 0.1.4 —— 删了重装也回不到新版本（2026-10-07 Mac / Windows 真机踩到，逐项对比确认）。
+ * 每装一个确切版本 pnpm 就往名单末尾加一条，旧条目越积越多。只改本插件的条目，别的不动；
+ * 文件不存在、读写失败都当没事（返回 false）。
+ * @returns 有没有改动文件
+ */
+export declare function pruneReleaseAgeExclusions(keep: string, file?: URL): boolean;
 export {};

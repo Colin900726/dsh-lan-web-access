@@ -30,7 +30,12 @@ import {
 } from './native-cookie.ts';
 import { handleLoginPost, loginPageHtml, loginView, sendHtml } from './login.ts';
 import { readDshVersion } from './selfcheck.ts';
-import { checkLatestVersion, manualUpdateCommand, runUpdate } from './updater.ts';
+import {
+  checkLatestVersion,
+  manualUpdateCommand,
+  pruneReleaseAgeExclusions,
+  runUpdate,
+} from './updater.ts';
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver';
 import { rawService } from './cordis-raw.ts';
 import { buildDevicesView } from './devices.ts';
@@ -685,6 +690,8 @@ export function registerAdminApi(rt: Runtime): () => void {
         const target = rt.update.latest;
         rt.update = { state: 'running', current: rt.version, latest: target };
         const result = await runUpdate(rt.profile, target);
+        // 名单里只留新版本，删了重装也不会掉回旧版（见 pruneReleaseAgeExclusions）。
+        if (result.ok) pruneReleaseAgeExclusions(target);
         rt.update = result.ok
           ? { state: 'done', current: rt.version, latest: target }
           : {
