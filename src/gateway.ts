@@ -1,11 +1,8 @@
 /**
- * 局域网网关（方案 A）：在 `lanHost:lanPort` 监听，白名单 + 密码会话校验通过后，
- * 把请求转发到 `127.0.0.1:<主端口>`，改写 Host 为本机、覆盖注入网关标记与原生
- * cookie，让主服务器把它当「本机请求」。同时转发 WebSocket 升级。
+ * 局域网入口：单独监听一个端口，查过允许列表和登录后，把请求转发给本机的 dsh（含 WebSocket）。
  *
- * 安全边界：网关是局域网路径唯一防线——白名单与会话校验必须在转发之前完成，
- * 任何漏转发都会放进来一个本机身份。敏感管理 API 不经网关转发（主服务器用
- * `x-dsh-remote-gateway` 标记区分，见 admin-api.ts）。
+ * 这是局域网设备唯一的入口，所有检查必须在转发之前做完：转发过去就等于本机身份。
+ * 插件自己的管理接口不转发。
  */
 
 import {
@@ -32,9 +29,9 @@ import type { Runtime } from './runtime.ts';
 import type { Settings } from './settings.ts';
 
 export interface GatewayHandle {
-  /** 按当前设置清理已连着的长连接：被吊销的登录、移出列表的设备、关掉免密后的免密连接。 */
+  /** 按当前设置断开不该再连着的长连接（被踢、被移出列表、免密被关）。 */
   enforce(revokedSids?: string[]): void;
-  /** 在 host:port 上监听；已在别的地址上监听就先关掉再开（改端口 / 网卡即时生效）。 */
+  /** 在 host:port 上监听；地址变了就关掉重开。 */
   start(host: string, port: number): Promise<void>;
   /** 关掉入口，并立即断开所有已连着的设备（含 WebSocket）。 */
   stop(): Promise<void>;
@@ -78,7 +75,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
   /** 第一台设备连进来（过了白名单）后记下来，设置页就不再显示防火墙提示条。 */
   function markFirstContact(): void {
     if (settingsStore.get().lanHintDone) return;
-    // 写配置文件失败（磁盘满、权限）不能让请求处理抛出去把 dsh 带崩：只是提示条多显示一会儿。
+    // 写设置失败不影响请求，只是提示条多显示一会儿。
     try {
       settingsStore.update({ lanHintDone: true });
     } catch (error) {
@@ -111,7 +108,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
     'upgrade',
   ]);
 
-  /** 构建转发到主服务器的请求头：改 Host、重写 Origin、丢弃逐跳头、加网关标记、附原生 cookie。 */
+  /** 转发用的请求头：改成本机地址，带上入口令牌和 dsh 的 cookie。 */
   function forwardHeaders(
     req: IncomingMessage,
     nativeCookie: string | undefined,
@@ -125,15 +122,15 @@ export function createGateway(rt: Runtime): GatewayHandle {
       else headers[k] = v;
     }
     headers.host = loopbackAuthority();
-    // 带上本进程的令牌：主服务凭它认出「入口已经查过允许列表和登录」（免密设备没有登录也能进）。
+    // 带上令牌，主服务凭它知道入口已经查过了。
     headers[GATEWAY_HEADER] = rt.gatewayToken;
-    // Origin 需与改写后的 Host 一致，否则主服务器（尤其 WebSocket 握手）可能拒。
+    // Origin 要和改过的 Host 一致，否则会被拒。
     if (headers.origin !== undefined) headers.origin = `http://${loopbackAuthority()}`;
     delete headers['x-forwarded-for'];
     delete headers['x-forwarded-host'];
     delete headers['x-forwarded-proto'];
     if (opts.upgrade) {
-      // 逐跳头里剔掉的 Connection/Upgrade 对 WebSocket 是必需的，需补回。
+      // WebSocket 需要 Connection/Upgrade，补回来。
       headers.connection = 'Upgrade';
       const upgrade = req.headers.upgrade;
       if (typeof upgrade === 'string') headers.upgrade = upgrade;
@@ -150,7 +147,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
   function handleRequest(req: IncomingMessage, res: ServerResponse): void {
     const ip = clientIp(req);
     const settings = settingsStore.get();
-    // 先按 URL 规则归一（`/./`、`%2e` 这类写法），和主服务认路径的方式一致，免得换个写法绕过下面的判断。
+    // 先把路径规范化，免得换个写法（`/./`、`%2e`）绕过下面的判断。
     let path: string;
     try {
       path = new URL(req.url ?? '/', 'http://x').pathname;
@@ -158,7 +155,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
       path = '/';
     }
 
-    // 白名单（局域网路径第一道闸）。
+    // 允许列表。
     const allowed = whitelistAllows(ip, settings);
     if (!allowed) {
       log.record('whitelist-deny', ip, path);
@@ -182,7 +179,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
       return;
     }
 
-    // 登录/退出/状态由网关自行处理（不回源主服务器）。
+    // 登录、退出、状态由入口自己处理。
     if (path === '/login') {
       sendHtml(res, 200, loginPageHtml(loginView(rt, ip, false)));
       return;
@@ -219,13 +216,13 @@ export function createGateway(rt: Runtime): GatewayHandle {
       return;
     }
 
-    // 插件自己的其余接口（改设置、密码、设备、更新……）只给本机用，入口这里直接拒绝，不转发。
+    // 插件的其他管理接口只给本机用，这里直接拒绝。
     if (path.startsWith('/api/remote-access/')) {
       jsonResponse(res, 403, { error: '仅限本机操作', code: ERROR_CODES.localOnly });
       return;
     }
 
-    // 会话校验（白名单免密开关除外）。
+    // 登录检查（列表内免密的设备除外）。
     if (!settings.whitelistBypassPassword && !hasSession(req)) {
       if (req.method === 'GET' || req.method === 'HEAD') {
         res.writeHead(302, { location: '/login', 'cache-control': 'no-store' });
@@ -237,7 +234,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
       return;
     }
 
-    // 转发到主服务器。
+    // 转发给 dsh。
     void mintLoopbackCookie().then((nativeCookie) => {
       if (nativeCookie === undefined) {
         // dsh 还没准备好（启动中、签名读不到）：页面给「dsh 还没准备好」，接口回 JSON。
@@ -261,7 +258,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
             if (v === undefined) continue;
             if (HOP_BY_HOP.has(k.toLowerCase())) continue;
             if (k.toLowerCase() === 'set-cookie') {
-              // dsh 的原生通行证只在入口和主服务之间用，不发给局域网设备（踢下线后它不该还留着一张）。
+              // dsh 的 cookie 不发给局域网设备，免得被踢后还留着一张。
               const kept = (Array.isArray(v) ? v : [v]).filter(
                 (c) => !c.trim().startsWith(NATIVE_COOKIE_PREFIX),
               );
@@ -279,7 +276,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
         else res.destroy();
       });
       req.on('error', () => proxyReq.destroy());
-      // 局域网那一端断了（被踢、入口关闭、设备走开），通往 dsh 的这半条也一起断，不留空挂的流式连接。
+      // 设备那头断了，通往 dsh 的这头也断掉。
       res.on('close', () => proxyReq.destroy());
       req.pipe(proxyReq);
     });
@@ -308,7 +305,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
     upgraded.set(socket, { ip: normalizeIp(ip) ?? ip, sid });
     socket.once('close', () => upgraded.delete(socket));
     void mintLoopbackCookie().then((nativeCookie) => {
-      // 等通行证的这一会儿里连接可能已经被踢掉了：不再去连 dsh。
+      // 等 cookie 的时候连接可能已经被踢了。
       if (socket.destroyed) return;
       if (nativeCookie === undefined) {
         socket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
@@ -323,7 +320,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
         headers,
       });
       proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
-        // 回写 101 + 上游协商头给客户端，再双向管道。
+        // 回 101，然后两头对接。
         const lines = ['HTTP/1.1 101 Switching Protocols'];
         for (const [k, v] of Object.entries(proxyRes.headers)) {
           if (v === undefined) continue;
@@ -331,7 +328,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
         }
         socket.write(`${lines.join('\r\n')}\r\n\r\n`);
         if (proxyHead && proxyHead.length) socket.write(proxyHead);
-        // 任一端断开（含被踢下线时 destroy），另一端也断开；pipe 自己不会关掉另一端。
+        // 一头断了，另一头也断开。
         socket.on('close', () => proxySocket.destroy());
         proxySocket.on('close', () => socket.destroy());
         socket.on('error', () => proxySocket.destroy());
@@ -339,7 +336,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
         proxySocket.pipe(socket);
         socket.pipe(proxySocket);
       });
-      // 目标未升级（返回非 101）时：不能让客户端 socket 悬挂，直接关闭。
+      // dsh 没同意升级：关掉，不让客户端干等。
       proxyReq.on('response', () => socket.destroy());
       proxyReq.on('error', () => socket.destroy());
       socket.once('close', () => proxyReq.destroy());
@@ -388,7 +385,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
           s.listen(port, host, () => resolve());
         });
       } catch (error) {
-        // 监听失败（如端口被占）时不能把 server 置为已存在，否则后续永远无法重试。
+        // 监听失败（如端口被占）：不记成已启动，下次还能重试。
         s.close();
         throw error;
       }
@@ -403,7 +400,7 @@ export function createGateway(rt: Runtime): GatewayHandle {
       server = undefined;
       listening = false;
       const closed = new Promise<void>((resolve) => s.close(() => resolve()));
-      // close() 只是不再接新连接；已连着的（含 WebSocket）要逐个断开，入口才算真的关了。
+      // close() 只是不接新连接，已连着的要逐个断开。
       for (const socket of sockets) socket.destroy();
       sockets.clear();
       await closed;

@@ -1,16 +1,11 @@
 /**
- * 局域网登录页（R-021），按 设计稿 定稿：独立网页（不在 dsh 窗口里），浅色苹果灰底 + 白卡片、
- * 深色跟随系统。主服务（本机关了免登录时）和局域网入口共用。
- *
- * 五种状态：
- * - login  正常：输密码。密码错时输入框抖一下、说清还能错几次；错到上限切到 locked。
- * - locked 次数太多：按钮倒计时，到点自动恢复。
- * - deny   这台设备不在允许列表：写出它的 IP 和三步添加方法（服务端直接渲染，403）。
- * - busy   dsh 还没准备好（启动中、入口暂停）：每 5 秒自动重试（503）。
- * 电脑名、来访 IP、登录保持天数都按实际填进来，页面上不加任何标记。
+ * 登录页（独立网页）。几种状态：
+ * - login 输密码；locked 错太多次，倒计时；
+ * - deny 设备不在允许列表，写出它的 IP 和添加方法（403）；
+ * - busy dsh 还没准备好，每 5 秒重试（503）。
  */
 
-/** 登录页上的全部文字（R-016：集中一处，第一版只出中文）。 */
+/** 登录页上的全部文字。 */
 import { ERROR_CODES } from './shared.ts';
 
 const TEXT = {
@@ -56,7 +51,7 @@ export type LoginView =
   | { state: 'deny'; host: string; ip: string }
   | { state: 'busy'; host: string };
 
-/** HTML 转义（电脑名、IP 都来自外部，进页面前转义）。 */
+/** HTML 转义。 */
 function esc(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -73,7 +68,7 @@ const ICON = {
   warn: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></svg>',
 };
 
-/** 样式值取自 设计稿（苹果系统色）。 */
+/** 样式（取自设计稿）。 */
 const CSS = `
 :root { color-scheme: light dark;
   --page: #F2F2F7; --card: #FFFFFF; --text: #1D1D1F; --t2: #3C3C43; --t3: #6E6E73;
@@ -215,7 +210,7 @@ export function loginPageHtml(view: LoginView): string {
         'locked',
         !locked,
       );
-    // 页面脚本里要用的句子以模板传进去（{n} 由脚本填），文字只在上面的 TEXT 里写一份。
+    // 脚本里要用的句子从 TEXT 传进去，{n} 由脚本填。
     const t = JSON.stringify({
       wrong: TEXT.wrong('{n}', view.lockSeconds),
       lockedButton: TEXT.lockedButton('{n}'),
@@ -234,7 +229,7 @@ export function loginPageHtml(view: LoginView): string {
   function fill(tpl, n) { return tpl.replace('{n}', String(n)); }
   function show(name) {
     cards.login.hidden = name !== 'login'; cards.locked.hidden = name !== 'locked';
-    // 换卡片时焦点跟过去（读屏会念新标题），不留在已经隐藏的卡片里。
+    // 换卡片时焦点跟过去，读屏软件会念新标题。
     if (name === 'locked') cards.locked.querySelector('h1').focus();
   }
   function lock(seconds) {
@@ -270,7 +265,7 @@ export function loginPageHtml(view: LoginView): string {
           k.hidden = true; m.hidden = false; m.textContent = fill(T.wrong, x.d.remaining);
           return;
         }
-        // 别的情况（这台设备刚被移出列表、dsh 暂停了……）：重新打开，让服务端给出对的那一页。
+        // 其他情况重新加载，让服务端给出对的那一页。
         if (x.status !== 0) { location.reload(); return; }
         k.hidden = true; m.hidden = false; m.textContent = T.network;
       })

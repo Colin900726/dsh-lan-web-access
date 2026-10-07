@@ -1,15 +1,11 @@
-/**
- * 运行检查（R-015 / R-008）：dsh 启动时和点「重新检查」时跑五项。
- * 前四项任一不过 → 安全退出（停止免登录、关闭局域网入口，见 index.ts）；第五项没设密码只是中性提示。
- * 这里只给结论和数据，给人看的句子在前端文案表里。
- */
+/** 运行检查：启动时和点「重新检查」时跑五项。前四项有没过的就安全退出；第五项（没设密码）只是提示。 */
 
 import { createRequire } from 'node:module';
 import { loadSigningSecret } from './native-cookie.ts';
 import { COMPAT_BELOW, COMPAT_MIN, type CheckId, type CheckResult } from './shared.ts';
 import type { Runtime } from './runtime.ts';
 
-/** 尽力读取宿主运行时 @deepseek-ai/dsh 的版本号。 */
+/** 读 dsh 的版本号，读不到返回 null。 */
 export function readDshVersion(): string | undefined {
   try {
     const require = createRequire(import.meta.url);
@@ -20,7 +16,7 @@ export function readDshVersion(): string | undefined {
   }
 }
 
-/** 比较 `x.y.z[-pre]`（semver 规则：预发布版低于同号正式版），返回负数 / 0 / 正数。 */
+/** 比较两个版本号（预发布版低于同号正式版），返回负数 / 0 / 正数。 */
 export function compareVersions(a: string, b: string): number {
   const [ma, pa] = splitVersion(a);
   const [mb, pb] = splitVersion(b);
@@ -50,7 +46,7 @@ function splitVersion(v: string): [number[], string[]] {
   return [main.split('.').map(Number), pre === undefined ? [] : pre.split('.')];
 }
 
-/** 本插件支持的 dsh 版本：[最低, 不含的上限)，与 package.json peerDependencies 一致。 */
+/** dsh 版本在不在支持范围内。 */
 export { COMPAT_BELOW, COMPAT_MIN };
 
 export function dshVersionInRange(v: string): boolean {
@@ -65,10 +61,7 @@ export const CRITICAL_CHECKS: readonly CheckId[] = [
   'dshVersion',
 ];
 
-/**
- * 测试用：环境变量 DSH_REMOTE_ACCESS_FAKE_FAIL=signing,dshVersion 让对应几项按「没通过」处理，
- * 用来在真 dsh 上演示安全退出（模拟 dsh 升级后签名格式变了）。正常使用不设。
- */
+/** 测试用：DSH_REMOTE_ACCESS_FAKE_FAIL=signing,dshVersion 让这几项按没通过处理。 */
 function fakeFailures(): Set<string> {
   return new Set(
     (process.env.DSH_REMOTE_ACCESS_FAKE_FAIL ?? '')
@@ -87,7 +80,7 @@ export async function runSelfCheck(rt: Runtime): Promise<CheckResult[]> {
   const signingOk = (await loadSigningSecret(rt.getCredentials())) !== undefined;
   const keyOk = settings.sessionSecret !== null;
   const dshVersion = readDshVersion() ?? null;
-  // 读不到版本号不算失败：签名那一项才是真正会坏的地方，版本号只是提示。
+  // 读不到版本号不算失败，只是提示。
   const versionOk = dshVersion === null || dshVersionInRange(dshVersion);
 
   const results: CheckResult[] = [

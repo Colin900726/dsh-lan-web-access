@@ -15,7 +15,7 @@ export type Toast = { kind: 'ok' | 'bad' | 'plain'; text: string; undo?: () => v
 export type SaveFailure = { kind: 'network' } | { kind: 'rejected'; code?: string; port?: number };
 export type SaveResult = { ok: true; data?: unknown } | ({ ok: false } & SaveFailure);
 
-/** 短于这个时长的保存不显示「进行中」（设计规范：小于 1 秒不显示）。 */
+/** 保存不到这么久就不显示「进行中」。 */
 export const BUSY_DELAY_MS = 1000;
 /** 「关不掉」红字提示停留时长。 */
 export const INLINE_ERROR_MS = 3000;
@@ -238,10 +238,7 @@ export function useSave(
   return [busy, save, isSaving];
 }
 
-/**
- * 下拉选择的保存：以最后一次选的为准。上一次还在保存时再改，不丢掉，排在后面等它回来再发
- * （中间的值跳过）；界面先显示刚选的值，服务端读回一致后再交还给服务端的值；失败弹回并提示。
- */
+/** 下拉选择的保存：以最后一次选的为准，上一次还在保存时排队；失败弹回并提示。 */
 export function useSelectSetting<T extends string | number>(
   serverValue: T,
   key: string,
@@ -336,7 +333,7 @@ export function useGuardedSwitch(
         showToast({ kind: 'bad', text: failureText(result) });
         return;
       }
-      // 平时不加说明，只有不成功的这一刻才原地红字（设计规范，2026-10-05）。
+      // 平时不加说明，失败时才原地显示红字。
       clearTimeout(errorTimer.current);
       setInlineError(inline);
       errorTimer.current = setTimeout(() => {
@@ -362,8 +359,6 @@ export function RowDesc({
     </p>
   );
 }
-
-/** 本机网卡里挑一个做局域网访问地址：选了网卡就用它，否则优先 en*（Wi-Fi / 有线），再其次第一块。 */
 
 const svg = {
   fill: 'none',
@@ -420,10 +415,7 @@ export function ago(ts: number, now = Date.now()): string {
   return t.time.days(Math.floor(s / 86400));
 }
 
-/**
- * 弹出面板：从中间放大浮现、背后压暗；Esc 或点空白关闭（Esc 不再往上冒，不会把 dsh 的设置窗口
- * 一起关掉）；Tab 只在面板里转；关掉后焦点回到打开它的按钮。
- */
+/** 弹出面板：Esc 或点空白关闭（不会连带关掉 dsh 设置窗口），Tab 只在面板里转，关掉后焦点回到原按钮。 */
 export function Sheet({
   title,
   lead,
@@ -448,8 +440,7 @@ export function Sheet({
     const opener = document.activeElement as HTMLElement | null;
     const first = ref.current?.querySelector<HTMLElement>('[data-autofocus], input, button');
     first?.focus();
-    // Esc 在捕获阶段先由面板接住：焦点不管落在哪（比如刚点的按钮被移除、焦点掉到 body），
-    // 都只关面板，不让 dsh 把整个设置窗口一起关掉。
+    // Esc 先由面板接住，只关面板，不让 dsh 把设置窗口一起关掉。
     const onEsc = (e: globalThis.KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
       e.preventDefault();

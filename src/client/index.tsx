@@ -1,10 +1,6 @@
 /**
- * 设置面板「局域网web访问」标签页（界面部分）。
- *
- * 按 设计稿 定稿实现：状态头（总开关）→ 分段切换 → 当前分段。
- * 分段随开发阶段逐个加入：第 1 阶段有「连接」（本机部分）和「关于」（版本与运行环境），
- * 设备、安全两段在各自阶段加入；没做的分段不出现，不留点了没反应的东西。
- * 所有读写走 `/api/remote-access/*` 普通 fetch。局域网设备打开时只读（`local === false`）。
+ * 设置页「局域网web访问」：状态头（总开关）+ 四个分段（连接、设备、安全、关于）。
+ * 局域网设备打开时只读。
  */
 
 import type { Context } from '@deepseek-ai/cordis';
@@ -44,7 +40,7 @@ const SECTION_ID = 'remote-access';
 /** 带「撤销」的提示条停留更久，来得及点。 */
 const UNDO_TOAST_MS = 5000;
 
-/** 端口「已保存」绿字停留时长（设计规范：2.5 秒）。 */
+/** 端口「已保存」绿字停留时长。 */
 const PORT_SAVED_MS = 2500;
 /** 设置页开着时多久刷新一次状态（已登录数、第一台设备连上后收起防火墙提示）。 */
 const POLL_MS = 5000;
@@ -83,10 +79,7 @@ export function RemoteAccessSection(_props: PropsRuntime<'settings.section'>): R
     [mounted],
   );
 
-  /**
-   * 读状态。只采用最新一次读取的结果；已经有状态时读失败就保留旧状态、提示一句：
-   * 保存之后刷新失败说「已保存，但没能刷新」；定时刷新失败只说一次「连不上 dsh」，恢复后再出问题才再说。
-   */
+  /** 读状态，只用最新一次的结果。读失败时保留旧内容并提示（定时刷新失败只提示一次）。 */
   const read = useCallback(
     async (poll: boolean) => {
       const seq = ++loadSeq.current;
@@ -435,8 +428,7 @@ function ConnPanel({
 
   const showLanEntry = status.lanEnabled && lan.checked;
 
-  // 局域网设备只读：按设计稿只列三行（本机免登录、局域网访问、端口）。本机地址 127.0.0.1 在别的设备上
-  // 指的是那台设备自己，访问地址它正在用，都不显示，也就没有能点却没用的「复制」。
+  // 局域网设备只读，只列三行；本机地址和访问地址对它没用，不显示。
   if (!status.local)
     return (
       <div className="group-wrap">

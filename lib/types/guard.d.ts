@@ -1,11 +1,6 @@
 /**
- * 请求拦截：路由包装（会话闸门 + 原生 Cookie 补签）+ `connection/request` 权威闸门
- * + index 注入（ownsHost + randomUUID polyfill）。
- *
- * 包装策略：
- * - 回查包装已注册的 exact/prefix/upgrade/fallback，再包装后续注册；
- * - 公共路由（/login、/api/remote-access/*）不包装；
- * - 缺原生 cookie 的授权 GET/HEAD 请求现场补签：文档导航用 200 跳板页，其余用 303。
+ * 请求拦截：给 dsh 的每个路由套一层登录检查，并给通过的请求补上 dsh 自己要的登录 cookie。
+ * 公共路由（/login、/api/remote-access/*）不拦。
  */
 import type { IncomingMessage } from 'node:http';
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver';
@@ -23,30 +18,21 @@ export interface GuardDeps {
     getCredentials: () => CredentialsLike | undefined;
     logger: LoggerLike;
     isPublicRoute: (path: string) => boolean;
-    /** 运行检查没通过、已安全退出：和总开关关掉一样，退回 dsh 官方认证（R-008）。 */
+    /** 运行检查没通过：和关掉总开关一样，交回 dsh 官方认证。 */
     suspended?: () => boolean;
-    /** 局域网入口转发时带的令牌（本进程启动时随机生成，别的进程拿不到）。 */
+    /** 局域网入口转发时带的令牌（每次启动随机生成）。 */
     gatewayToken?: string;
-    /** 「本机免登录」关着时，插件替本机浏览器签发了一条原生 cookie：记下它，以后不当作 dsh 签发的认。 */
+    /** 记下插件自己签发的 cookie，以后不把它当成 dsh 签发的。 */
     recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
 }
 /**
- * 请求是否授权（插件没在接管时一律交给 dsh 自己认证）：
- * - 主服务上只认本机发来的请求。局域网设备必须走局域网入口，不能直连主端口（dsh 绑在 0.0.0.0 时）
- *   凭一个登录绕过允许列表和「局域网访问」开关；
- * - 局域网入口转发来的（带本进程令牌）：入口已经查过允许列表、来源和登录 / 免密，放行；
- * - 本机免登录开着、地址栏也是本机：放行；
- * - 否则要有效登录（本机免登录关着时，本机用密码登录）。
+ * 请求是否放行：
+ * - 主端口只认本机请求，局域网设备必须走局域网入口；
+ * - 局域网入口转发来的、本机免登录开着的本机请求、有有效登录的：放行；
+ * - 本机免登录关着时，本机还可以用 dsh 官方 token 登录（Desktop 不受这个开关影响）。
  */
 export declare function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean;
-/**
- * isAuthorized 的异步版：本机请求带着原生 cookie、而签名密钥还没读进内存时（插件刚启动，
- * Desktop 窗口第一个请求就是这样），先等密钥读完再判一次。2026-10-07 Desktop 真机踩到：
- * 同步判断时密钥还没读，Desktop 启动被拦。
- */
+/** isAuthorized 的异步版：签名密钥还没读到时（插件刚启动），先等它读完再判一次。 */
 export declare function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
-/**
- * 安装守卫，返回撤销函数：撤销 index 注入、还原 webServer 的注册方法、把被包装过的
- * 路由与 fallback 换回原处理器。插件卸载（停用、热重载）时调用，之后可再次安装。
- */
+/** 安装守卫，返回撤销函数（插件停用时把改过的东西全部还原）。 */
 export declare function installGuard(deps: GuardDeps): () => void;

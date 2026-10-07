@@ -24,7 +24,7 @@ export type SaveResult = {
 } | ({
     ok: false;
 } & SaveFailure);
-/** 短于这个时长的保存不显示「进行中」（设计规范：小于 1 秒不显示）。 */
+/** 保存不到这么久就不显示「进行中」。 */
 export declare const BUSY_DELAY_MS = 1000;
 /** 「关不掉」红字提示停留时长。 */
 export declare const INLINE_ERROR_MS = 3000;
@@ -58,10 +58,7 @@ export declare function useSave(onSaved: () => void, path?: string): [
     save: (patch: Record<string, unknown>) => Promise<SaveResult | undefined>,
     isSaving: () => boolean
 ];
-/**
- * 下拉选择的保存：以最后一次选的为准。上一次还在保存时再改，不丢掉，排在后面等它回来再发
- * （中间的值跳过）；界面先显示刚选的值，服务端读回一致后再交还给服务端的值；失败弹回并提示。
- */
+/** 下拉选择的保存：以最后一次选的为准，上一次还在保存时排队；失败弹回并提示。 */
 export declare function useSelectSetting<T extends string | number>(serverValue: T, key: string, onSaved: () => void, showToast: (toast: Toast) => void): [value: T, change: (next: T) => void];
 /** 开关。保存中用 aria-disabled 而不是原生 disabled，键盘焦点不会丢。 */
 export declare function Switch({ checked, label, busy, onToggle, }: {
@@ -98,10 +95,7 @@ export declare const DashSmallIcon: () => ReactElement;
 export declare const Spinner: () => ReactElement;
 /** 「多久前」：刚刚 / N 分钟前 / N 小时前 / N 天前。 */
 export declare function ago(ts: number, now?: number): string;
-/**
- * 弹出面板：从中间放大浮现、背后压暗；Esc 或点空白关闭（Esc 不再往上冒，不会把 dsh 的设置窗口
- * 一起关掉）；Tab 只在面板里转；关掉后焦点回到打开它的按钮。
- */
+/** 弹出面板：Esc 或点空白关闭（不会连带关掉 dsh 设置窗口），Tab 只在面板里转，关掉后焦点回到原按钮。 */
 export declare function Sheet({ title, lead, role, onClose, children, wide, }: {
     title: string;
     lead?: string;

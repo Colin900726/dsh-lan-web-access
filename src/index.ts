@@ -1,12 +1,8 @@
 /**
- * dsh-lan-web-access 插件入口。
+ * 插件入口：装好登录检查、管理接口和局域网入口，设置变了就跟着更新。
  *
- * 职责：装配运行时（设置/会话/限速/日志/credentials）、安装守卫（路由包装 +
- * 原生 Cookie 补签）、注册管理 API、启动局域网网关、订阅设置变更做热更新，
- * 并在 `connection/request` 官方扩展点加一道会话闸门（主防线）。
- *
- * 安全退出（R-008）：启动时跑五项运行检查，前四项任一不过 → 守卫不再补签、闸门放给 dsh 官方认证、
- * 局域网入口关闭；点「重新检查」或下次启动检查全过就自动恢复。
+ * 启动时跑五项运行检查，前四项有没过的就「安全退出」：交回 dsh 官方认证、关掉局域网入口，
+ * 检查重新通过后自动恢复。
  */
 
 import { allowLatestInstall } from './updater.ts';
@@ -33,10 +29,7 @@ import { loadSigningSecret, type CredentialsLike } from './native-cookie.ts';
 export const name = 'dsh-lan-web-access';
 export const inject = ['webServer'];
 
-/**
- * 插件配置：没有。所有设置都在设置页里改，存在 `~/.dsh/remote-access.json`；
- * 不在 dsh 的插件配置里放一份不生效的同名项。
- */
+/** 插件配置：没有，设置都在设置页里改。 */
 export type Config = object;
 
 export const Config: z<Config> = z.object({});
@@ -83,8 +76,7 @@ export function apply(ctx: Context, _config: Config): void {
   const settingsStore = new SettingsStore();
   const settings = settingsStore.get();
 
-  // 旧版本升级上来时「本机免登录」已经是关的、却没记关掉的时刻：从现在算起。
-  // 之前签发的原生 cookie 都不认，Desktop 窗口启动时会用 dsh 的 token 换一张新的。
+  // 从旧版本升上来、本机免登录已经关着却没记时间：从现在算起。
   if (!settings.allowLoopback && settings.localLoginRequiredSince === null)
     settingsStore.update({ localLoginRequiredSince: Date.now(), lockedMintedCookies: [] });
 
@@ -95,7 +87,7 @@ export function apply(ctx: Context, _config: Config): void {
   const rateLimiter = createRateLimiter();
   const log = new AccessLog(200);
 
-  // 不缓存：credentials 服务可能在 connection 插件激活后才就绪，首次 miss 不应永久失效。
+  // 每次现取：credentials 可能比本插件晚就绪。
   const getCredentials = (): CredentialsLike | undefined => {
     try {
       return (ctx as unknown as { get(key: string): unknown }).get('credentials') as
@@ -107,7 +99,7 @@ export function apply(ctx: Context, _config: Config): void {
 
   const profile = detectProfile(ctx);
   const version = ownVersion();
-  // 只填包名安装总是装最新版：pnpm 冷静期放行名单里本插件只留一条不带版本号的（见 allowLatestInstall）。
+  // 让以后只填包名也装最新版（见 allowLatestInstall）。
   if (allowLatestInstall()) ctx.logger.info('remote-access: release-age exclusion set to latest');
   const logger: LoggerLike = {
     info: (m, ...a) => ctx.logger.info(m, ...a),
@@ -138,7 +130,7 @@ export function apply(ctx: Context, _config: Config): void {
         lockedMintedCookies: [...kept, { h: fingerprint, exp: expiresAt }].slice(-500),
       });
     },
-    // 下面两个在局域网入口装配好之后换成真的（见「局域网入口」一段）。
+    // 下面两个等局域网入口装好后换成真的。
     syncLan: () => Promise.resolve(undefined),
     lanState: () => ({
       host: '',
@@ -150,7 +142,6 @@ export function apply(ctx: Context, _config: Config): void {
     }),
   };
 
-  // 组装守卫依赖（isAuthorized / isAuthorizedAsync 供 connection/request 闸门复用）。
   const guardDeps: GuardDeps = {
     webServer,
     getSettings: () => settingsStore.get(),
@@ -162,15 +153,14 @@ export function apply(ctx: Context, _config: Config): void {
     gatewayToken: rt.gatewayToken,
     recordLockedMint: (fingerprint, expiresAt) => rt.recordLockedMint(fingerprint, expiresAt),
   };
-  // 守卫与管理 API 都交给 ctx.effect：插件卸载（停用、热重载）时撤销，再加载时重新安装，不残留、不报重复路由。
+  // 交给 ctx.effect：插件停用时自动撤销。
   ctx.effect(() => installGuard(guardDeps));
-  // 启动时就把 dsh 的签名密钥读进来，「本机免登录」关着时 Desktop 窗口的第一个请求就能校验。
+  // 提前读 dsh 的签名密钥，Desktop 的第一个请求就要用。
   void loadSigningSecret(getCredentials());
 
-  // 管理/认证 API。
   ctx.effect(() => registerAdminApi(rt));
 
-  // 共享 API 会话闸门（官方 connection/request waterfall，主防线）。
+  // dsh 官方的请求检查点：没通过的直接 401。
   ctx.on('connection/request', async (request, response, next) => {
     if (!(await isAuthorizedAsync(request, guardDeps))) {
       jsonResponse(response, 401, { error: 'unauthorized' });
@@ -179,21 +169,21 @@ export function apply(ctx: Context, _config: Config): void {
     await next();
   });
 
-  // 局域网入口（随设置启停）。同步串行执行：前一次开关还没完成时，后一次排队，不会两个端口一起开。
+  // 局域网入口随设置开关。开关操作排队执行，不会同时开两个端口。
   let gateway: GatewayHandle | undefined;
-  /** 插件已卸载（停用、热重载）：之后不再开入口、不再跑检查。 */
+  /** 插件已停用：之后不再开入口、不再跑检查。 */
   let disposed = false;
   let lanError: LanState['error'];
   let lanQueue: Promise<LanState['error']> = Promise.resolve(undefined);
   const syncLan = (): Promise<LanState['error']> => {
     const next = lanQueue.then(async () => {
-      // 卸载之后还在路上的设置请求，不能把入口重新打开、留下没人管的端口。
+      // 停用后不再开入口，免得留下没人管的端口。
       if (disposed) {
         await gateway?.stop();
         return undefined;
       }
       const s = settingsStore.get();
-      // 第一次运行检查跑完之前不开，免得检查没过还先开了一下。
+      // 第一次运行检查跑完之前不开。
       const want =
         s.lanEnabled &&
         s.enabled &&
@@ -234,7 +224,7 @@ export function apply(ctx: Context, _config: Config): void {
       }
       return lanError;
     });
-    // 队列本身不能卡在出错状态：这一次出错只回报给调用方，后面的开关照常排队。
+    // 这次出错不影响后面排队的操作。
     lanQueue = next.catch(() => undefined);
     return next;
   };
@@ -251,8 +241,7 @@ export function apply(ctx: Context, _config: Config): void {
       hintDone: s.lanHintDone,
     };
   };
-  // 运行检查。dsh 刚启动时登录签名可能还没准备好（connection 插件稍后才激活），
-  // 启动时只有「读取 dsh 登录签名」没过就隔一秒再查，最多等 STARTUP_WAIT_TRIES 次，之后才算没通过。
+  // 运行检查。dsh 刚启动时签名密钥可能还没好：只差这一项时每秒重查，最多 STARTUP_WAIT_TRIES 次。
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let faultTimer: ReturnType<typeof setTimeout> | undefined;
   rt.recheck = async () => {
@@ -272,7 +261,7 @@ export function apply(ctx: Context, _config: Config): void {
       logger.info('remote-access: self-check passed again, resumed');
     }
     await syncLan();
-    // 安全退出期间每 FAULT_RECHECK_MS 自动再查一次：签名晚到（dsh 刚装好还没生成）或换回兼容版本后自己恢复。
+    // 安全退出期间定时重查，条件满足后自动恢复。
     clearTimeout(faultTimer);
     if (failed.length > 0 && !disposed)
       faultTimer = setTimeout(() => void rt.recheck(), FAULT_RECHECK_MS);
@@ -290,7 +279,7 @@ export function apply(ctx: Context, _config: Config): void {
   };
   void startupCheck(STARTUP_WAIT_TRIES);
 
-  // 追踪密钥轮换（改密码会写新 sessionSecret → 全部会话失效）。
+  // 改密码会换会话密钥，所有登录随之失效。
   let seenSecret = settings.sessionSecret;
   const offSettings = settingsStore.onChange((next) => {
     if (next.sessionSecret !== null && next.sessionSecret !== seenSecret) {
@@ -298,17 +287,16 @@ export function apply(ctx: Context, _config: Config): void {
       seenSecret = next.sessionSecret;
     }
     sessions.setMaxAgeDays(next.sessionMaxAgeDays);
-    // 移出列表的设备：它的登录立刻失效（吊销会触发长连接清理）。本机登录（本机免登录关着时用）不受列表管。
+    // 移出允许列表的设备，登录立刻失效（本机登录不受影响）。
     sessions.kickWhere((s) => !isLoopbackAddress(s.ip) && !whitelistAllows(s.ip, next));
     gateway?.enforce();
-    // 设置变了（设 / 清密码、局域网开关等）就重跑一遍运行检查，「关于」里的结果跟着变；重查里会同步局域网入口。
-    // 启动检查还没跑完时只同步入口（那时入口本来就不开）。
+    // 设置变了就重跑运行检查（会顺带同步局域网入口）；启动检查没跑完时只同步入口。
     if (rt.checkedAt !== null) rt.recheck().catch(() => undefined);
     else syncLan().catch(() => undefined);
   });
   const offRevoke = sessions.onRevoke((sids) => gateway?.enforce(sids));
 
-  // 清理：先取消订阅，再等局域网入口真正关掉（端口释放后再启用才不会撞上 EADDRINUSE）。
+  // 停用时：取消订阅，等局域网入口关掉、端口释放。
   ctx.effect(() => {
     return async () => {
       disposed = true;

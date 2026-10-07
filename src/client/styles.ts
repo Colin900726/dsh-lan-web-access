@@ -1,8 +1,4 @@
-/**
- * 设置页样式（值来自 设计稿，苹果系统色）。
- * 全部挂在 .dla 根节点下，不影响 dsh 其他页面；深色跟随 dsh 自己的主题开关
- * （body[data-ds-dark-theme]），不看系统设置，保证和设置窗口一致。
- */
+/** 设置页样式。都挂在 .dla 下，不影响 dsh 其他页面；深色跟随 dsh 自己的主题开关。 */
 export const ROOT_CLASS = 'dla';
 
 export const css = `
@@ -93,7 +89,7 @@ body[data-ds-dark-theme] .dla {
 .dla .hero-body { flex: 1; min-width: 0; }
 .dla .hero-title { margin: 0; font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.01em; }
 .dla .hero-sub { margin-top: 2px; font-size: 13px; line-height: 18px; color: var(--t2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-/* 窗口很窄、状态一行放不下时：圆点留在第一行文字旁边，不单独占一行（设计稿只画了正常宽度）。 */
+/* 窗口很窄时，圆点留在第一行文字旁边。 */
 .dla .hero-sub { flex-wrap: nowrap; align-items: flex-start; }
 .dla .hero-sub > .dot { margin-top: 5px; }
 

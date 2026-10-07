@@ -1,8 +1,6 @@
 /**
- * 登录（R-014 / R-021）：主服务和局域网入口共用这一份，免得两边规则不一致。
- * - 错到上限：429 + locked + retryAfter（还要等几秒）
- * - 密码不对：401 + wrong-password + remaining（还能错几次）；这次正好错到上限就直接回 locked
- * - 成功：发登录 cookie（主服务另附 dsh 原生通行证），记一笔访问记录
+ * 登录：主服务和局域网入口共用。
+ * 被锁 → 429 + 还要等几秒；密码错 → 401 + 还能错几次；成功 → 发登录 cookie、记访问记录。
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -48,8 +46,7 @@ export async function handleLoginPost(
     jsonResponse(res, 400, { error: '请求体非法', code: ERROR_CODES.invalidBody });
     return;
   }
-  // 读请求体要等网络；这期间同一设备别的请求可能已经错满 5 次。校验密码前再查一次，
-  // 之后的「校验 + 记次数」是同步的（scrypt 用同步版），并发请求插不进来。
+  // 读请求体期间别的请求可能已经把次数错满了，校验前再查一次。
   if (rateLimiter.isBlocked(ip, exempt)) {
     lockedResponse();
     return;

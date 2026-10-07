@@ -42,7 +42,7 @@ export const GATEWAY_HEADER = 'x-dsh-remote-gateway';
 /** 登录保持可选的天数。 */
 export const SESSION_MAX_AGE_CHOICES = [1, 7, 14, 30] as const;
 
-/** 插件支持的 dsh 版本：[最低, 不含的上限)，与 package.json peerDependencies 一致；COMPAT_LABEL 是给人看的写法。 */
+/** 支持的 dsh 版本范围（和 package.json 的 peerDependencies 一致）。 */
 export const COMPAT_MIN = '0.1.7-rc.1';
 export const COMPAT_BELOW = '0.3.0-0';
 export const COMPAT_LABEL = '0.1.7 – 0.2.x';
@@ -166,11 +166,7 @@ export interface CheckResult {
   version?: string | null;
 }
 
-/**
- * 一键更新（R-007）的六种状态：
- * checking 正在查 · latest 已是最新 · available 有新版本 · unavailable 暂时查不到（没发布 / 超时，中性）
- * · running 更新中 · done 完成 · failed 失败（reason 说原因）。
- */
+/** 一键更新的状态：查询中 / 已是最新 / 有新版本 / 查不到 / 更新中 / 完成 / 失败。 */
 export interface UpdateState {
   state:
     'idle' | 'checking' | 'latest' | 'available' | 'unavailable' | 'running' | 'done' | 'failed';

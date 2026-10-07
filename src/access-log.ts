@@ -1,6 +1,4 @@
-/**
- * 访问日志环形缓冲（最近 200 条，内存）。
- */
+/** 访问记录：内存里留最近 200 条。 */
 
 import type { AccessLogEntry } from './settings.ts';
 
@@ -22,8 +20,7 @@ export class AccessLog {
 
   record(kind: AccessLogEntry['kind'], ip: string, detail: string): void {
     const now = Date.now();
-    // 不在列表里的设备每发一个请求都会被拒：同一设备、同一类拒绝，一分钟内合并成一条记次数，
-    // 免得几百个请求把 200 条记录冲掉，真正的登录、踢下线记录看不到。
+    // 同一设备同一类拒绝，一分钟内合并成一条，免得把重要记录冲掉。
     if (MERGED_KINDS.has(kind)) {
       for (let i = this.entries.length - 1; i >= 0; i--) {
         const e = this.entries[i]!;

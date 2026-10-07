@@ -1,8 +1,4 @@
-/**
- * 「设备」页的数据：允许列表的每一条，带上它的登录状态；免密设备带最近活跃时间；
- * 再加上不在任何一条里、却登录着的浏览器（「列表为空时允许私有网段」时会有），以及最近被拒的地址。
- * 纯函数，方便测试。
- */
+/** 「设备」页的数据：允许列表每一条的登录状态、不在列表里却登录着的浏览器、最近被拒的地址。 */
 
 import type { ActiveSession, AccessLogEntry, WhitelistEntry } from './settings.ts';
 import { ipInCidr, normalizeIp } from './trust.ts';
@@ -37,7 +33,7 @@ export interface DevicesView {
   recentDenied: DeniedAddress[];
 }
 
-/** 最近被拒绝的地址最多列几个（用户 2026-10-05 确认：5 个）。 */
+/** 最近被拒的地址最多列几个。 */
 export const RECENT_DENIED_LIMIT = 5;
 
 /** 从 User-Agent 认出浏览器和系统，认不出就写「浏览器」「未知系统」。 */

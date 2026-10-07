@@ -1,9 +1,6 @@
 /**
- * 管理/认证 API：注册到主 webServer 的 `/login` 与 `/api/remote-access/*`。
- *
- * 敏感操作（改设置/密码/白名单/更新/踢下线）只限「本机」——回环请求且未经
- * 局域网网关（网关会覆盖注入 `x-dsh-remote-gateway: 1` 标记）。登录/退出/状态
- * 供本机（allowLoopback=false）使用；局域网浏览器走网关自己的登录。
+ * 管理接口：`/login` 和 `/api/remote-access/*`。
+ * 改设置、密码、允许列表、更新、踢下线只限本机；局域网设备走局域网入口自己的登录。
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -56,7 +53,7 @@ export function clientIp(req: IncomingMessage): string {
   return req.socket?.remoteAddress ?? 'unknown';
 }
 
-/** 一块网卡的 IPv4 信息，供设置页提示浏览器访问地址。 */
+/** 一块网卡的 IPv4 地址（设置页用来显示访问地址）。 */
 export interface LanIpInfo {
   /** 网卡名，如 `en0` / `eth0` / `Wi-Fi`。 */
   name: string;
@@ -64,14 +61,14 @@ export interface LanIpInfo {
   address: string;
 }
 
-/** 枚举本机网卡的 IPv4 地址（排除回环/内部接口与 169.254 链路本地地址），带网卡名。 */
+/** 本机网卡的 IPv4 地址（不含回环和 169.254）。 */
 export function listLanIps(): LanIpInfo[] {
   const found: LanIpInfo[] = [];
   for (const [name, list] of Object.entries(networkInterfaces())) {
     for (const item of list ?? []) {
       if (item.internal) continue;
       if (item.family !== 'IPv4' || !item.address) continue;
-      // 169.254/16 是链路本地地址，其他设备无法访问，排除以免误导。
+      // 169.254 别的设备访问不到。
       if (item.address.startsWith('169.254.')) continue;
       found.push({ name, address: item.address });
     }
@@ -80,13 +77,8 @@ export function listLanIps(): LanIpInfo[] {
 }
 
 /**
- * 是否「本机」：回环对端 + 回环 Host、没经过局域网入口，并且是 dsh 自己的页面发来的。
- *
- * 防 CSRF：本机浏览器里别的网页（包括同一台电脑其他端口上的页面——它们和 dsh 算同站不同源）
- * 可以向 127.0.0.1 发「简单请求」改密码、开局域网。所以浏览器带了来源信息就必须完全同源：
- * Origin 等于 `http://{Host}`（含端口），Sec-Fetch-Site 只能是 same-origin / none。
- * 不带这些头的（curl 等非浏览器客户端）不会替别人携带 cookie，放行。POST 体还必须是 JSON（见 parseJsonBody），
- * 跨源的 JSON 请求浏览器一定先预检，预检不会通过。
+ * 是不是本机发来的：本机地址、没经过局域网入口，而且是 dsh 自己的页面发的。
+ * 后一条防的是本机浏览器里别的网页借机改设置：浏览器带了来源信息就必须和 dsh 同源。
  */
 export function isLocalRequest(req: IncomingMessage): boolean {
   if (!isLocalOrigin(req.socket?.remoteAddress, req.headers.host, false)) return false;
@@ -116,7 +108,7 @@ export async function parseJsonBody(
   req: IncomingMessage,
   maxBytes = 1024 * 1024,
 ): Promise<Record<string, unknown>> {
-  // 只收 JSON：text/plain 这类「简单请求」不触发预检，别的网页能借浏览器发过来（见 isLocalRequest）。
+  // 只收 JSON：别的网页发跨源 JSON 请求会被浏览器先拦下（预检）。
   const type = String(req.headers['content-type'] ?? '').toLowerCase();
   if (!type.startsWith('application/json'))
     throw new Error('content-type must be application/json');
@@ -165,10 +157,7 @@ export function editionOf(profile: string): Edition {
   return 'unknown';
 }
 
-/**
- * 组装 `/api/remote-access/status` 的返回内容。主服务和局域网入口都用这一个函数，
- * 两边只差「谁在看」：本机多给已登录数和网卡列表，非本机多给它自己的 IP。
- */
+/** 状态接口的内容：本机多给已登录数和网卡列表，局域网设备多给它自己的 IP。 */
 export function buildStatus(
   rt: Runtime,
   view: {
@@ -211,7 +200,7 @@ export function buildStatus(
 export type SettingsPatchResult =
   { ok: true; patch: Partial<Settings> } | { ok: false; error: string; code: ErrorCode };
 
-/** 校验并规范前端提交的设置补丁。 */
+/** 校验前端提交的设置改动。 */
 export function coerceSettingsPatch(
   body: Record<string, unknown>,
   current: Settings,
@@ -224,8 +213,7 @@ export function coerceSettingsPatch(
     if (!body.allowLoopback && current.passwordHash === null)
       return { ok: false, error: '需要先设置管理密码', code: ERROR_CODES.passwordRequired };
     patch.allowLoopback = body.allowLoopback;
-    // 从开变关：记下时刻，此前签发的原生 cookie（含插件替浏览器补签的）都不再认；
-    // 从关变开：不再需要。见 guard.ts hasDshIssuedCookie。
+    // 关掉时记下时刻，之前签发的 cookie 都不再认（见 guard.ts）。
     if (body.allowLoopback !== current.allowLoopback) {
       patch.localLoginRequiredSince = body.allowLoopback ? null : Date.now();
       patch.lockedMintedCookies = [];
@@ -286,17 +274,14 @@ export function coerceSettingsPatch(
   return { ok: true, patch };
 }
 
-/**
- * 管理路由的注册记录，挂在 webServer 原对象上（全局 Symbol，热重载换了模块也能看到）。
- * 新实例注册前先拆掉旧实例的路由；旧实例卸载时若记录已被接管，什么都不做。
- */
+/** 挂在 webServer 上的注册记录：重新注册时先拆掉旧的。 */
 const ADMIN_RECORD = Symbol.for('dsh-lan-web-access.admin-api');
 
 interface AdminRecord {
   dispose(): void;
 }
 
-/** 注册管理/认证 API，返回撤销函数（插件卸载时移除全部路由，之后可再次注册）。 */
+/** 注册管理接口，返回撤销函数。 */
 export function registerAdminApi(rt: Runtime): () => void {
   const { webServer, settingsStore, sessions, getCredentials } = rt;
   const holder = rawService(webServer) as unknown as Record<symbol, AdminRecord | undefined> & {
@@ -320,7 +305,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       if (holder[ADMIN_RECORD] !== record) return;
       delete holder[ADMIN_RECORD];
       for (const { route: r, dispose } of registered.reverse()) {
-        // 真实 webServer 的撤销按路径无条件删除；路径上已不是自己这条就不动它。
+        // 路径上已经不是自己这条了就不删。
         const table = r.kind === 'prefix' ? holder.prefixes : holder.exact;
         if (table !== undefined && table.get(r.path) !== r) continue;
         try {
@@ -353,7 +338,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
 
-    // 状态（公开，供前端判断 local/authenticated）。
+    // 状态（公开）。
     route({
       kind: 'exact',
       path: '/api/remote-access/status',
@@ -368,26 +353,24 @@ export function registerAdminApi(rt: Runtime): () => void {
           buildStatus(rt, {
             local,
             trusted,
-            // 和闸门（guard.ts isAuthorized）的判断一致：插件没在接管时由 dsh 自己认证。
             authenticated:
               !s.enabled || rt.fault() || (trusted && s.allowLoopback) || session !== undefined,
             port: webServer.port,
             clientIp: clientIp(req),
-            // 网卡列表只给本机看（局域网设备不需要知道这台电脑有哪些网卡）。
+            // 网卡列表只给本机看。
             withLanIps: local,
           }),
         );
       },
     });
 
-    // 登录（本机 allowLoopback=false 时使用）。
+    // 登录（本机免登录关着时，本机用）。
     route({
       kind: 'exact',
       path: '/api/remote-access/login',
       handler: async (req, res) => {
         const ip = clientIp(req);
-        // 主端口上的登录只给本机用（本机免登录关着时）。局域网设备一律走局域网入口的登录，
-        // 那里有允许列表、来源检查和限速；直连主端口（dsh 绑在 0.0.0.0 时）不给登录。
+        // 局域网设备走局域网入口的登录（那里有允许列表和限速），这里只给本机。
         if (!isLoopbackAddress(req.socket?.remoteAddress)) {
           jsonResponse(res, 403, { error: '仅限本机', code: ERROR_CODES.localOnly });
           return;
@@ -395,7 +378,7 @@ export function registerAdminApi(rt: Runtime): () => void {
         await handleLoginPost(rt, req, res, {
           ip,
           exempt: isLocalRequest(req),
-          // 本机登录成功时一并补上 dsh 原生通行证，省得再跳一次。
+          // 顺便补上 dsh 的 cookie，省一次跳转。
           extraCookies: async () => {
             const authority = authorityOf(req.headers);
             const secret = await loadSigningSecret(getCredentials());
@@ -479,7 +462,7 @@ export function registerAdminApi(rt: Runtime): () => void {
           const lanError = await rt.syncLan();
           const wantsLan = settingsStore.get().lanEnabled && settingsStore.get().enabled;
           if (lanError !== undefined && wantsLan) {
-            // 这次改动让入口开不起来：退回改动前的网卡 / 端口 / 开关，入口回到原样。
+            // 改完入口开不起来：退回原来的设置。
             settingsStore.update({
               lanEnabled: before.lanEnabled,
               lanHost: before.lanHost,
@@ -552,7 +535,7 @@ export function registerAdminApi(rt: Runtime): () => void {
         }
         if (!requireLocal(req, res)) return;
         const sessionSecret = makeSessionSecret();
-        // 本机免登录关着时清密码，浏览器就谁都进不去了：一并打开（用户 2026-10-05 确认）。
+        // 没密码时本机免登录必须开着，否则谁都进不去。
         const reopenedLocal = !settingsStore.get().allowLoopback;
         settingsStore.update({
           passwordHash: null,
@@ -624,7 +607,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
 
-    // 设备列表（本机）：允许列表 + 登录状态 + 最近被拒的地址。
+    // 设备列表（本机）。
     route({
       kind: 'exact',
       path: '/api/remote-access/devices',
@@ -662,8 +645,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
 
-    // 一键更新（本机，R-007）。GET 在打开「关于」时查一次最新版本；POST 开始更新。
-    // 更新在服务端跑，关掉设置页也会继续，结果记进访问记录；再打开「关于」看到的是这次的结果。
+    // 一键更新（本机）。GET 查最新版本，POST 开始更新；关掉设置页也会继续。
     route({
       kind: 'exact',
       path: '/api/remote-access/update',
@@ -690,7 +672,7 @@ export function registerAdminApi(rt: Runtime): () => void {
         const target = rt.update.latest;
         rt.update = { state: 'running', current: rt.version, latest: target };
         const result = await runUpdate(rt.profile, target);
-        // pnpm 刚给新版本加了一条带版本号的放行条目：换回不带版本号的（见 allowLatestInstall）。
+        // 让以后只填包名也装最新版（见 allowLatestInstall）。
         if (result.ok) allowLatestInstall();
         rt.update = result.ok
           ? { state: 'done', current: rt.version, latest: target }
@@ -712,7 +694,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
 
-    // 运行检查：GET 取最近一次结果（局域网设备也能看）；POST 重新检查（本机）。
+    // 运行检查：GET 看结果，POST 重新检查（本机）。
     route({
       kind: 'exact',
       path: '/api/remote-access/selfcheck',
@@ -725,7 +707,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
   } catch (error) {
-    // 注册到一半失败（如路径已被占用）：撤掉已注册的，免得下次启用撞上重复路由。
+    // 注册到一半失败：撤掉已注册的。
     record.dispose();
     throw error;
   }

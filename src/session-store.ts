@@ -1,9 +1,7 @@
 /**
- * 密码散列（scrypt）+ 可吊销会话（服务端会话表）。
- *
- * 会话 cookie 携带 `{sid, u, e}`（sid 随机、u 用户名、e 过期秒），HMAC-SHA256
- * 签名；服务端保留会话表，支持「踢单个设备」与「改密码全下线」。密码散列与
- * 会话签名密钥均只存 scrypt 散列/随机密钥，不存明文。
+ * 密码散列和登录会话。
+ * 登录 cookie 是签过名的 `{sid, u, e}`；服务端另存一张会话表，所以能踢单个设备、改密码全部下线。
+ * 密码只存 scrypt 散列。
  */
 
 import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'node:crypto';
@@ -118,7 +116,7 @@ export class SessionManager {
     if (sids.length > 0) for (const fn of this.revokeListeners) fn(sids);
   }
 
-  /** 更新签名密钥（改密码/改用户名时轮换，全部旧会话即刻失效）。 */
+  /** 换签名密钥（改密码时用，旧登录全部失效）。 */
   rotateSecret(secret: string): void {
     this.secret = secret;
     this.revoke([...this.active.keys()]);
@@ -139,7 +137,7 @@ export class SessionManager {
     );
   }
 
-  /** 清理已过期（createdAt + maxAge 超时）的会话条目，避免表无限增长。 */
+  /** 清掉过期的会话。 */
   private pruneExpired(): void {
     const now = this.now();
     const maxAgeMs = this.maxAgeDays * 86400 * 1000;
@@ -159,7 +157,7 @@ export class SessionManager {
     return { sid: payload.sid, username: payload.u };
   }
 
-  /** 踢单个设备下线（sid 为 128 位随机值，复用可忽略，移除即吊销）。 */
+  /** 踢一个登录下线。 */
   kick(sid: string): boolean {
     if (!this.active.has(sid)) return false;
     this.revoke([sid]);

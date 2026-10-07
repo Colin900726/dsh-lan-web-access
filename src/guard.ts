@@ -1,11 +1,6 @@
 /**
- * 请求拦截：路由包装（会话闸门 + 原生 Cookie 补签）+ `connection/request` 权威闸门
- * + index 注入（ownsHost + randomUUID polyfill）。
- *
- * 包装策略：
- * - 回查包装已注册的 exact/prefix/upgrade/fallback，再包装后续注册；
- * - 公共路由（/login、/api/remote-access/*）不包装；
- * - 缺原生 cookie 的授权 GET/HEAD 请求现场补签：文档导航用 200 跳板页，其余用 303。
+ * 请求拦截：给 dsh 的每个路由套一层登录检查，并给通过的请求补上 dsh 自己要的登录 cookie。
+ * 公共路由（/login、/api/remote-access/*）不拦。
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -44,18 +39,15 @@ export interface GuardDeps {
   getCredentials: () => CredentialsLike | undefined;
   logger: LoggerLike;
   isPublicRoute: (path: string) => boolean;
-  /** 运行检查没通过、已安全退出：和总开关关掉一样，退回 dsh 官方认证（R-008）。 */
+  /** 运行检查没通过：和关掉总开关一样，交回 dsh 官方认证。 */
   suspended?: () => boolean;
-  /** 局域网入口转发时带的令牌（本进程启动时随机生成，别的进程拿不到）。 */
+  /** 局域网入口转发时带的令牌（每次启动随机生成）。 */
   gatewayToken?: string;
-  /** 「本机免登录」关着时，插件替本机浏览器签发了一条原生 cookie：记下它，以后不当作 dsh 签发的认。 */
+  /** 记下插件自己签发的 cookie，以后不把它当成 dsh 签发的。 */
   recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
 }
 
-/**
- * 正在用 dsh 官方 token 换登录 cookie：`GET /?token=…`。Desktop 窗口每次启动都这样进来，
- * `dsh web` 打印的链接也是这样。token 由 dsh 自己校验，这里只是不拦、不替它补签。
- */
+/** 用 dsh 官方 token 换登录 cookie（`GET /?token=…`，Desktop 每次启动都这样）。交给 dsh 自己校验。 */
 function isOfficialTokenExchange(req: IncomingMessage): boolean {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   let url: URL;
@@ -67,10 +59,7 @@ function isOfficialTokenExchange(req: IncomingMessage): boolean {
   return (url.pathname === '/' || url.pathname === '/index.html') && url.searchParams.has('token');
 }
 
-/**
- * 带着 dsh 自己签发的登录 cookie：签名对、没过期、签发时间不早于「本机免登录」关掉的时刻，
- * 且不是插件在关着期间替密码登录签发的。Desktop 窗口用的就是这种。
- */
+/** 带着 dsh 自己签发的有效 cookie（Desktop 窗口用的就是这种），且签发于「本机免登录」关掉之后。 */
 function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings): boolean {
   const authority = authorityOf(req.headers);
   if (authority === undefined) return false;
@@ -86,7 +75,7 @@ function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings):
   return !s.lockedMintedCookies.some((x) => x.h === fingerprint);
 }
 
-/** 请求是不是本插件的局域网入口转发来的（它已经查过允许列表、来源和登录）。 */
+/** 是不是本插件的局域网入口转发来的（入口已经查过设备和登录）。 */
 function fromOwnGateway(req: IncomingMessage, token: string | undefined): boolean {
   const got = req.headers[GATEWAY_HEADER];
   if (token === undefined || typeof got !== 'string') return false;
@@ -95,29 +84,24 @@ function fromOwnGateway(req: IncomingMessage, token: string | undefined): boolea
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** 插件此刻是否在接管认证：总开关开着、且没有安全退出。 */
+/** 插件是否在接管认证：总开关开着，且运行检查通过。 */
 function active(deps: GuardDeps): boolean {
   return deps.getSettings().enabled && deps.suspended?.() !== true;
 }
 
-/**
- * 守卫安装记录，挂在 webServer 原对象上（用全局 Symbol，热重载换了模块也能看到）。
- * 同一个 webServer 只允许一份守卫：新实例安装时先拆掉旧的；旧实例卸载时若记录已不是自己的，什么都不做。
- */
+/** 守卫挂在 webServer 上的记录：同一个 webServer 只留一份，重新安装时先拆旧的。 */
 const GUARD_RECORD = Symbol.for('dsh-lan-web-access.guard');
 
 interface GuardRecord {
-  /** rollback = 安装失败时的回滚（日志措辞不同）。 */
+  /** rollback：安装失败时回滚。 */
   dispose(rollback?: boolean): void;
 }
 
 /**
- * 请求是否授权（插件没在接管时一律交给 dsh 自己认证）：
- * - 主服务上只认本机发来的请求。局域网设备必须走局域网入口，不能直连主端口（dsh 绑在 0.0.0.0 时）
- *   凭一个登录绕过允许列表和「局域网访问」开关；
- * - 局域网入口转发来的（带本进程令牌）：入口已经查过允许列表、来源和登录 / 免密，放行；
- * - 本机免登录开着、地址栏也是本机：放行；
- * - 否则要有效登录（本机免登录关着时，本机用密码登录）。
+ * 请求是否放行：
+ * - 主端口只认本机请求，局域网设备必须走局域网入口；
+ * - 局域网入口转发来的、本机免登录开着的本机请求、有有效登录的：放行；
+ * - 本机免登录关着时，本机还可以用 dsh 官方 token 登录（Desktop 不受这个开关影响）。
  */
 export function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean {
   if (!active(deps)) return true;
@@ -126,22 +110,16 @@ export function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean {
   const s = deps.getSettings();
   if (s.allowLoopback && isLoopbackHost(req.headers.host)) return true;
   if (deps.sessions.validate(readSessionToken(req) ?? '') !== undefined) return true;
-  // 本机免登录关着：本机浏览器除了插件密码，也可以走 dsh 官方的 token 方式（Desktop 窗口就是这样），
-  // 「Desktop 不受这个开关影响」（用户 2026-10-05 定，2026-10-07 真机发现被拦后修）。
   if (!isLoopbackHost(req.headers.host)) return false;
   if (isOfficialTokenExchange(req)) {
-    // dsh 收下 token 后马上会签发 cookie，紧接着的请求就要用签名密钥校验：现在就开始读。
+    // 下一个请求就要校验 dsh 的 cookie，提前读签名密钥。
     peekSigningSecret(deps.getCredentials());
     return true;
   }
   return hasDshIssuedCookie(req, deps, s);
 }
 
-/**
- * isAuthorized 的异步版：本机请求带着原生 cookie、而签名密钥还没读进内存时（插件刚启动，
- * Desktop 窗口第一个请求就是这样），先等密钥读完再判一次。2026-10-07 Desktop 真机踩到：
- * 同步判断时密钥还没读，Desktop 启动被拦。
- */
+/** isAuthorized 的异步版：签名密钥还没读到时（插件刚启动），先等它读完再判一次。 */
 export async function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean> {
   if (isAuthorized(req, deps)) return true;
   if (!isLoopbackAddress(req.socket?.remoteAddress) || !isLoopbackHost(req.headers.host))
@@ -160,10 +138,7 @@ function replyJson(res: ServerResponse, status: number, data: Record<string, unk
   res.end(JSON.stringify(data));
 }
 
-/**
- * 安装守卫，返回撤销函数：撤销 index 注入、还原 webServer 的注册方法、把被包装过的
- * 路由与 fallback 换回原处理器。插件卸载（停用、热重载）时调用，之后可再次安装。
- */
+/** 安装守卫，返回撤销函数（插件停用时把改过的东西全部还原）。 */
 export function installGuard(deps: GuardDeps): () => void {
   const { webServer, logger, getCredentials } = deps;
   const raw = rawService(webServer);
@@ -175,7 +150,7 @@ export function installGuard(deps: GuardDeps): () => void {
   }
   /** 卸载时按逆序执行的还原动作。 */
   const restores: Array<() => void> = [];
-  /** 逐个执行还原；某一步抛错不影响后面的步骤，返回第一个错误。 */
+  /** 逐个还原，某一步出错不影响后面，返回第一个错误。 */
   const runRestores = (): unknown => {
     let firstError: unknown;
     for (const restore of restores.reverse()) {
@@ -207,10 +182,9 @@ export function installGuard(deps: GuardDeps): () => void {
   holder[GUARD_RECORD] = record;
 
   try {
-    // ── 1. index 注入：ownsHost + randomUUID polyfill ─────────────────────────
-    // LAN 浏览器地址栏 hostname 非回环 → connection.isLoopback=false → ui-settings
-    // mirror 退回 memory 模式（Models 等不可用）。ownsHost hook 让前端报告回环；
-    // 明文 HTTP 非安全上下文缺 crypto.randomUUID，需 polyfill。
+    // ── 1. 往首页注入脚本 ──
+    // 局域网设备的地址不是本机，dsh 前端会把部分设置（如 Models）变成只读，这里让它按本机处理；
+    // 明文 HTTP 下浏览器没有 crypto.randomUUID，补一个。
     const untapIndex = webServer.tapIndex((html) => {
       const script = `<script>
 ;(function () {
@@ -233,11 +207,11 @@ export function installGuard(deps: GuardDeps): () => void {
     });
     restores.push(untapIndex);
 
-    // ── 2. 路由包装 ───────────────────────────────────────────────────────────
+    // ── 2. 包装路由 ──
     const register = webServer.register.bind(webServer);
     const registerUpgrade = webServer.registerUpgrade.bind(webServer);
     const registerFallback = webServer.registerFallback.bind(webServer);
-    /** 改写 webServer 上的方法；卸载时还原（原来是自身属性就放回，否则删掉露出原型方法）。 */
+    /** 改写 webServer 上的方法，卸载时还原。 */
     const patchMethod = <K extends 'register' | 'registerUpgrade' | 'registerFallback'>(
       key: K,
       replacement: WebServer[K],
@@ -256,10 +230,9 @@ export function installGuard(deps: GuardDeps): () => void {
     const guardedUpgrades = new WeakSet<WebUpgradeRoute>();
     const guardedFallbacks = new WeakSet<WebRoute['handler']>();
 
-    /** 为已授权但缺原生 cookie 的 GET/HEAD 请求现场补签；接管了响应则返回 true。 */
+    /** 放行的请求如果缺 dsh 的 cookie，现场补签；接管了响应返回 true。 */
     const settleCookie = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
       if (req.method !== 'GET' && req.method !== 'HEAD') return false;
-      // 用 dsh 官方 token 换 cookie 的那一下交给 dsh 自己处理，不替它补签。
       if (isOfficialTokenExchange(req)) return false;
       const authority = authorityOf(req.headers);
       if (authority === undefined || readNativeCookie(req.headers, authority) !== undefined)
@@ -344,7 +317,7 @@ export function installGuard(deps: GuardDeps): () => void {
       const original = route.handler;
       const wrapped: WebUpgradeRoute['handler'] = (req, socket, head) => {
         if (isAuthorized(req, deps)) return original(req, socket, head);
-        // 密钥还没读到时等一下再判（见 isAuthorizedAsync）；等待期间先暂停读取，免得丢数据。
+        // 密钥还没读到时等一下再判，等待期间暂停读取，免得丢数据。
         socket.pause();
         void isAuthorizedAsync(req, deps).then(
           (ok) => {
@@ -364,7 +337,7 @@ export function installGuard(deps: GuardDeps): () => void {
       });
     };
 
-    // 回查包装已注册路由（第三方插件可能先于本插件注册）。
+    // 包装已经注册的路由（别的插件可能比本插件先注册）。
     const tables = raw as unknown as {
       exact?: Map<string, WebRoute>;
       prefixes?: Map<string, WebRoute>;
@@ -374,7 +347,7 @@ export function installGuard(deps: GuardDeps): () => void {
     for (const route of tables.exact?.values() ?? []) guardRoute(route);
     for (const route of tables.prefixes?.values() ?? []) guardRoute(route);
     for (const route of tables.upgrades?.values() ?? []) guardUpgradeRoute(route);
-    /** fallback 换成包装版，卸载时若座位上仍是包装版就换回原处理器。 */
+    /** 把 fallback 换成包装版，卸载时换回。 */
     const trackFallback = (original: WebRoute['handler'], wrapped: WebRoute['handler']): void => {
       restores.push(() => {
         if (tables.fallback === wrapped) tables.fallback = original;
@@ -401,7 +374,7 @@ export function installGuard(deps: GuardDeps): () => void {
       return registerFallback(wrapped);
     });
   } catch (error) {
-    // 装到一半失败：把已经装上的撤掉，不留半套守卫。
+    // 装到一半失败：撤掉已装的部分。
     record.dispose(true);
     throw error;
   }

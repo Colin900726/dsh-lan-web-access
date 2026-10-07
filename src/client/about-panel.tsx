@@ -1,8 +1,6 @@
 /**
- * 「关于」分段（R-015 / R-007 / R-008），按 设计稿 定稿：
- * - 版本：插件（一键更新六种状态）、dsh（是否在支持范围）、运行环境；
- * - 运行检查：五项逐项列出，本机可「重新检查」。
- * 最新版本只在打开「关于」时查（不后台定时查）；局域网设备只看版本和检查结果，没有按钮。
+ * 「关于」分段：插件版本和一键更新、dsh 版本、运行环境、五项运行检查。
+ * 只在打开时查最新版本；局域网设备只能看，没有按钮。
  */
 
 import type { ReactElement } from 'react';
@@ -209,7 +207,7 @@ export function AboutPanel({
   /** 查版本和点更新各用各的序号：更新进行中切走再切回来查一次，不能把更新的结果作废。 */
   const checkSeq = useRef(0);
 
-  // 更新在服务端跑（约 30 秒）：状态轮询带回的结果到了「完成 / 失败」，界面跟着变，不靠哪一次请求回来。
+  // 更新在服务端跑，界面靠轮询状态跟着变。
   const serverUpdate = status.update;
   useEffect(() => {
     if (serverUpdate === undefined) return;
@@ -242,7 +240,7 @@ export function AboutPanel({
       setUpdate((u) => ({
         ...(u ?? { current: status.version }),
         state: 'failed',
-        // 请求根本没送到才是「连不上」；被拒（不是本机等）按一般失败说，不让人去查网络。
+        // 请求没送到才说「连不上」，被拒按一般失败说。
         reason: result.kind === 'network' ? 'network' : 'failed',
       }));
     onChanged();

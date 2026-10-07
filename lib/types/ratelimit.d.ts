@@ -1,9 +1,4 @@
-/**
- * 登录限速：每 IP 失败锁定 + 全局指数退避。
- *
- * 用工厂函数创建独立实例（可单测）。本机（真回环）豁免全局退避，避免攻击者
- * 借此把管理员锁在自己机器外面。
- */
+/** 登录限速：同一设备错太多次要等；所有设备总共错太多，等待逐步加长。本机不受限。 */
 export interface RateLimitOptions {
     maxFailuresPerIp?: number;
     lockoutMs?: number;

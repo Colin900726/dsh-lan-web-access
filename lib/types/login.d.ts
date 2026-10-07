@@ -1,8 +1,6 @@
 /**
- * 登录（R-014 / R-021）：主服务和局域网入口共用这一份，免得两边规则不一致。
- * - 错到上限：429 + locked + retryAfter（还要等几秒）
- * - 密码不对：401 + wrong-password + remaining（还能错几次）；这次正好错到上限就直接回 locked
- * - 成功：发登录 cookie（主服务另附 dsh 原生通行证），记一笔访问记录
+ * 登录：主服务和局域网入口共用。
+ * 被锁 → 429 + 还要等几秒；密码错 → 401 + 还能错几次；成功 → 发登录 cookie、记访问记录。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { loginPageHtml, type LoginView } from './login-page.ts';

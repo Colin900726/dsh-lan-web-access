@@ -1,15 +1,13 @@
 /**
- * 可持久化设置模型 + 默认值 + 纯校验。
- *
- * 运行时设置统一存 `$DSH_HOME/remote-access.json`（0600），不写 cordis.patch.yml：
- * patch 是整行替换，且改配置会触发热重载，容易覆盖用户手写内容。
+ * 设置的结构、默认值和校验。
+ * 存在 `~/.dsh/remote-access.json`（仅本人可读），不放 dsh 的插件配置里：那里一改就会重新加载插件。
  */
 /** 设备白名单条目。 */
 import { SESSION_MAX_AGE_CHOICES } from './shared.ts';
 export interface WhitelistEntry {
     /** 稳定 id（客户端生成）。 */
     id: string;
-    /** 备注名，如「B MacBook Pro」。 */
+    /** 备注名，如「客厅 iPad」。 */
     name: string;
     /** IP 或 IPv4 CIDR，如 `192.168.1.20`、`100.64.0.0/10`。 */
     value: string;
@@ -23,7 +21,7 @@ export interface AccessLogEntry {
     /** 同一设备短时间内重复被拒，合并成一条，这里记次数（没有 = 1）。 */
     count?: number;
 }
-/** 在线会话（服务端表，用于「在线设备」与单设备下线）。 */
+/** 在线会话（用于「已登录设备」和踢下线）。 */
 export interface ActiveSession {
     sid: string;
     username: string;
@@ -35,13 +33,13 @@ export interface ActiveSession {
 /** 完整运行时设置。 */
 export interface Settings {
     version: number;
-    /** 启用本插件（关闭即恢复官方 token 认证）。 */
+    /** 总开关（关掉即恢复 dsh 官方 token 认证）。 */
     enabled: boolean;
     /** 本机免登录（含 SSH 隧道）。 */
     allowLoopback: boolean;
     /** 局域网访问。 */
     lanEnabled: boolean;
-    /** 局域网监听 IP（空 = 未设置）。 */
+    /** 局域网监听地址（空 = 所有网卡）。 */
     lanHost: string;
     /** 局域网监听端口；null = 跟随 dsh 主端口 + 1（Desktop 19388、Web 3081）。 */
     lanPort: number | null;
@@ -53,21 +51,17 @@ export interface Settings {
     whitelistEmptyMode: 'deny-all' | 'private-only';
     /** 白名单内设备是否免密码。 */
     whitelistBypassPassword: boolean;
-    /** scrypt 密码散列 `salt:hash`；null = 未设置。 */
+    /** 密码散列（scrypt，`salt:hash`）；null = 没设。 */
     passwordHash: string | null;
     /** 管理密码上次设置的时间（毫秒）；未设置为 null。 */
     passwordSetAt: number | null;
     /** 会话有效期（天）。 */
     sessionMaxAgeDays: number;
-    /** 会话 HMAC 签名密钥（首次启动生成）。 */
+    /** 会话签名密钥（第一次启动生成）。 */
     sessionSecret: string | null;
-    /**
-     * 「本机免登录」从开变成关的时间（毫秒）；开着时为 null。关着时，本机请求凭 dsh 自己签发、
-     * 且签发时间不早于此刻的原生 cookie 也放行（Desktop 窗口每次启动用 dsh 的 token 换一张新的）；
-     * 插件在「本机免登录」开着时替浏览器签发的旧 cookie 早于此刻，不放行。
-     */
+    /** 「本机免登录」关掉的时间；开着时为 null。关掉之前签发的 cookie 都不再认。 */
     localLoginRequiredSince: number | null;
-    /** 「本机免登录」关着期间，插件因密码登录替本机浏览器签发的原生 cookie 指纹（不算 dsh 自己签发的）。 */
+    /** 「本机免登录」关着期间插件自己签发的 cookie 指纹（不当成 dsh 签发的）。 */
     lockedMintedCookies: {
         h: string;
         exp: number;
@@ -78,14 +72,11 @@ export { SESSION_MAX_AGE_CHOICES };
 export declare const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
 export declare const MIN_PASSWORD_LENGTH = 12;
 export declare function isValidSessionMaxAgeDays(value: unknown): value is number;
-/** 端口是否在 1–65535 之间（整数）。 */
+/** 端口是否在 1–65535。 */
 export declare function isPortInRange(port: unknown): port is number;
-/**
- * 局域网入口实际用的端口：没设过就用 dsh 主端口 + 1；设过的端口如果正好等于主端口
- * （例如从 Desktop 带过来的设置装到了 Web），也退回主端口 + 1，不和 dsh 抢端口。
- */
+/** 局域网入口实际用的端口：没设过或和主端口冲突时，用主端口 + 1。 */
 export declare function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, mainPort: number): number;
-/** 局域网端口是否可用：在范围内，且不等于 dsh 实际在用的主端口（Desktop 19387、Web 默认 3080，以运行时为准）。 */
+/** 局域网端口是否可用：在范围内，且不等于 dsh 主端口。 */
 export declare function isValidPort(port: unknown, mainPort: number): boolean;
-/** 规范化未知来源的 settings 对象，缺失/非法字段回落到默认值。 */
+/** 读进来的设置：缺的、不合法的字段用默认值。 */
 export declare function normalizeSettings(raw: unknown): Settings;

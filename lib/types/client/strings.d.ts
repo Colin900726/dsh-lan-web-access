@@ -12,7 +12,7 @@ export declare const zh: {
         readonly unreachable: "读不到插件状态，请刷新重试";
         /** 总开关关着时，分组下方的说明（设计稿「插件已停用」）。 */
         readonly keptWhileOff: "下面的设置都保留着，打开总开关后原样恢复。";
-        /** 运行检查没通过、已安全退出（R-008）。 */
+        /** 运行检查没通过、已安全退出。 */
         readonly fault: "已暂停 · 已退回 dsh 官方登录方式";
         readonly checking: "正在做运行检查…";
     };
@@ -35,7 +35,7 @@ export declare const zh: {
         readonly copyLocal: "复制本机访问地址";
         readonly copied: "已复制本机访问地址";
         readonly copyFailed: "没能复制，请手动选中地址复制";
-        /** 没设密码时去关「本机免登录」，关不掉那一刻的提示（后端返回错误码 password-required 时显示）。 */
+        /** 没设密码时去关「本机免登录」的提示。 */
         readonly needPassword: "先在「安全」里设置管理密码";
         readonly lanLabel: "局域网访问";
         readonly lanDesc: "同一网络里的其他设备用浏览器打开，需要密码";
