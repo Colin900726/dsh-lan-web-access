@@ -4,9 +4,12 @@
  * 不用 `dsh plugin update`：它就是 pnpm update，只在安装时记下的范围里升级 —— 从 GitHub 带标签装的
  * （`github:…#v0.1.2`）会原样重装旧版，npm 装的记成 `^0.1.3` 也升不到 0.2.0，刚发布的版本还会被
  * pnpm 的「新版本冷静期」挡住，而命令照样成功退出（2026-10-07 Mac Desktop 真机踩到）。装确切版本号
- * 会把来源换成 npm 上这个版本；装完再核对磁盘上的版本号，对不上就报失败，不报「完成」。
+ * 不受这些限制；装完再核对磁盘上的版本号，对不上就报失败，不报「完成」。
  *
- * 版本源默认是 npm；发布到 npm 之前（Q-001）查不到，显示「暂时查不到新版本」，中性，不算错。
+ * 来源不锁死一种（用户 2026-10-07：「优先npm，如果链接不通，网络中断等问题，可以用github的方法…
+ * 总之不能锁死只一种方式」）：依次试 npm 官方源 → 国内镜像 npmmirror → GitHub 上同版本的标签，
+ * 哪个装上了这个版本就停。查最新版本同时问 npm 官方源和国内镜像，取较高的那个。
+ * 都查不到（没发布、超时、断网）显示「暂时查不到新版本」，中性，不算错。
  * 演示用两个环境变量（正常使用不设）：
  * - DSH_REMOTE_ACCESS_REGISTRY：版本源地址，返回 `{"version": "x.y.z"}`；
  * - DSH_REMOTE_ACCESS_UPDATE_CMD：代替更新命令运行的命令（交给系统 shell；此时不核对装上的版本）。
@@ -20,7 +23,13 @@ import type { UpdateState } from './shared.ts';
 export declare const PACKAGE_NAME = "dsh-lan-web-access";
 /** 查版本超时（R-007 异常处理：8 秒）。 */
 export declare const CHECK_TIMEOUT_MS = 8000;
-/** 查最新版本：有新版本 → available；一样或更旧 → latest；查不到（没发布、超时、断网）→ unavailable。 */
+export declare const NPM_REGISTRY = "https://registry.npmjs.org";
+export declare const MIRROR_REGISTRY = "https://registry.npmmirror.com";
+export declare const GITHUB_REPO = "Colin900726/dsh-lan-web-access";
+/**
+ * 查最新版本（几个源同时问，取最高的）：有新版本 → available；一样或更旧 → latest；
+ * 都查不到（没发布、超时、断网）→ unavailable。
+ */
 export declare function checkLatestVersion(current: string): Promise<UpdateState>;
 interface UpdateCommand {
     cmd: string;
@@ -30,7 +39,10 @@ interface UpdateCommand {
 }
 /** 让用户在终端手动运行的更新命令（更新命令找不到时显示）。 */
 export declare function manualUpdateCommand(profile: string, version: string): string;
-export declare function resolveUpdateCommand(profile: string, version: string, platform?: NodeJS.Platform, resourcesPath?: string | undefined): UpdateCommand | undefined;
+/** 一键更新依次尝试的安装来源。 */
+export type UpdateSource = 'npm' | 'mirror' | 'github';
+export declare const UPDATE_SOURCES: readonly UpdateSource[];
+export declare function resolveUpdateCommand(profile: string, version: string, platform?: NodeJS.Platform, resourcesPath?: string | undefined, source?: UpdateSource): UpdateCommand | undefined;
 export interface UpdateResult {
     ok: boolean;
     reason?: 'network' | 'no-command' | 'failed';
@@ -38,11 +50,16 @@ export interface UpdateResult {
 }
 /** 磁盘上本插件 package.json 的版本号（更新后核对用；读不到返回 undefined）。 */
 export declare function installedVersion(): string | undefined;
-/** 运行更新命令，装上 `version` 这个确切版本。超时、失败都只回报，不动设置。 */
+/**
+ * 运行更新，装上 `version` 这个确切版本。依次试 npm 官方源 → 国内镜像 → GitHub，
+ * 某个来源命令成功且磁盘上的版本号对上了就停；都不行才报失败。超时、失败都只回报，不动设置。
+ */
 export declare function runUpdate(profile: string, version: string, options?: {
+    /** 每个来源的超时。 */
     timeoutMs?: number;
     /** 装完核对版本号；默认核对，只有演示变量代替更新命令时不核对。 */
     verify?: boolean;
     readInstalled?: () => string | undefined;
+    sources?: readonly UpdateSource[];
 }): Promise<UpdateResult>;
 export {};

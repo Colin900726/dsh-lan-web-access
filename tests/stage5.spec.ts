@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
@@ -11,7 +11,7 @@ import { apply } from '../src/index.ts';
 import { SettingsStore } from '../src/settings-store.ts';
 import { hashPassword, makeSalt } from '../src/session-store.ts';
 import { dshVersionInRange } from '../src/selfcheck.ts';
-import { checkLatestVersion, runUpdate } from '../src/updater.ts';
+import { checkLatestVersion, runUpdate, UPDATE_SOURCES } from '../src/updater.ts';
 import { fakeCredentials } from './helpers.ts';
 
 let dir: string;
@@ -309,6 +309,24 @@ describe('R-007 一键更新', () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
     const r = await runUpdate('web', '9.9.9', { verify: true, readInstalled: () => '9.9.9' });
     expect(r).toMatchObject({ ok: true });
+  });
+  it('Given npm 官方源和国内镜像都连不上、GitHub 能装上，Then 用 GitHub 装上，回报成功（来源不锁死一种）', async () => {
+    const counter = join(mkdtempSync(join(tmpdir(), 'dsh-upd-')), 'n');
+    // 第 1、2 次（npm、镜像）断网，第 3 次（GitHub）成功
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; if [ "$n" -ge 2 ]; then exit 0; else echo ECONNRESET; exit 1; fi`;
+    const r = await runUpdate('web', '9.9.9', {
+      verify: true,
+      readInstalled: () => '9.9.9',
+      sources: UPDATE_SOURCES,
+    });
+    expect(r).toMatchObject({ ok: true });
+    expect(readFileSync(counter, 'utf8').trim()).toBe('3');
+    expect(r.output).toContain('[GitHub]');
+  });
+  it('Given 三个来源都断网，Then 回报 network', async () => {
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'echo ECONNRESET; exit 1';
+    const r = await runUpdate('web', '9.9.9', { sources: UPDATE_SOURCES });
+    expect(r).toMatchObject({ ok: false, reason: 'network' });
   });
   it('Given 更新时断网，Then 回报 network', async () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD =

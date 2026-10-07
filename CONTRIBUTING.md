@@ -19,7 +19,7 @@ pnpm install        # 安装依赖
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint（src + tests）
 npm run format      # prettier 格式化
-npm test            # vitest（164 个用例，不连外网）
+npm test            # vitest（167 个用例，不连外网）
 npm run build       # tsc + tsdown，产物输出到 lib/
 npm run dev         # 构建后启动 dsh web（插件需已用「从源码」方式装进 web profile）
 ```
@@ -47,7 +47,7 @@ dsh-lan-web-access/
 │   ├── *.js                    tsc 产出 —— 服务端部分
 │   ├── types/**                tsc 类型声明
 │   └── client.js (+.map)       tsdown 产出 —— 界面部分，注册进 window.__ModuleLoader__
-├── tests/                      vitest 单元测试（18 个 spec / 164 个用例）
+├── tests/                      vitest 单元测试（18 个 spec / 167 个用例）
 ├── .github/workflows/ci.yml    推送时自动检查：测试、编译、lib/ 与源码一致
 ├── cordis.patch.yml            宿主把本插件插进 Cordis 树的那一行（运行时必需）
 ├── tsconfig.json               服务端部分 + 类型声明的编译设置
@@ -94,7 +94,7 @@ dsh-lan-web-access/
 | `access-log.ts` | 访问记录环形缓冲（最近 200 条，内存；重复被拒合并计数） |
 | **版本与自检** | |
 | `selfcheck.ts` | 五项运行检查、版本比较（semver 规则）、前四项判定安全退出 |
-| `updater.ts` | 一键更新：查 npm 最新版本 + `dsh plugin add dsh-lan-web-access@<该版本>`，装完核对磁盘上的版本号（不用 `plugin update`：它按安装时的范围升级，GitHub 钉了标签的会原样重装旧版；Desktop 自举、Windows 用 `dsh.cmd`） |
+| `updater.ts` | 一键更新：同时问 npm 官方源和国内镜像取最新版本；`dsh plugin add` 装那个确切版本，依次试 npm 官方源 → npmmirror → GitHub 同版本标签，装完核对磁盘上的版本号（不用 `plugin update`：它按安装时的范围升级，GitHub 钉了标签的会原样重装旧版；Desktop 自举、Windows 用 `dsh.cmd`） |
 | **界面部分（`client/`）** | |
 | `client/index.tsx` | 设置页外壳：状态头、分段、提示条、「连接」分段 |
 | `client/devices-panel.tsx` | 「设备」分段与设备详情、添加设备面板 |
@@ -129,11 +129,11 @@ dsh-lan-web-access/
 | `settings.spec.ts` | 设置校验 | 5 |
 | `selfcheck.spec.ts` | 版本比较（含预发布版） | 3 |
 | `lifecycle.spec.ts` | 停用 / 再启用不残留、不报重复路由 | 9 |
-| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 71 |
+| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 74 |
 | `desktop.spec.ts`、`desktop-cold.spec.ts` | 「本机免登录」关着时 Desktop 不被拦：token 交换、dsh 签发的 cookie、密钥还没读到时 | 15 |
 | `review-fixes.spec.ts`、`review.spec.ts` | 代码复核发现的问题的回归测试（CSRF、路径归一绕过、并发登录、长连接空挂、记录被刷掉等） | 21 |
 
-合计 **164 个用例**，不连外网（版本源、更新命令都用本地假的）。
+合计 **167 个用例**，不连外网（版本源、更新命令都用本地假的）。
 
 只跑单个文件：
 
@@ -162,7 +162,9 @@ dsh-lan-web-access/
 
 1. 改 `package.json` 的 `version`（如 `0.1.4`），`npm run build`，连同 `lib/` 一起提交、推送。
 2. 在 GitHub 上新建 Release，标签写 `v0.1.4`（必须和 `version` 一致，前面加 `v`），发布。
-3. `.github/workflows/publish.yml` 会自动跑检查、测试、编译，然后发到 npm（npm 可信发布，不存密钥）。在仓库的 Actions 页能看到进度。
+3. `.github/workflows/publish.yml` 会自动跑检查、测试、编译，然后发到 npm（npm 可信发布，不存密钥），再通知国内镜像 npmmirror 同步。在仓库的 Actions 页能看到进度。
+
+刚发布的几分钟内，npm 上能查到新版本但安装包可能还下不到；一键更新这时会换镜像、GitHub 再试，都不行就报失败，过几分钟再点即可。
 
 同一个版本号在 npm 上只能发一次；发错了就改版本号再发一个新的。
 

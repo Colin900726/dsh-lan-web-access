@@ -47,6 +47,19 @@ describe('R-022 一键更新的命令按系统选', () => {
       'dsh plugin --profile web add dsh-lan-web-access@0.1.5',
     );
   });
+  it('Given 备用来源，Then 国内镜像带 --registry，GitHub 装同版本的标签', () => {
+    expect(resolveUpdateCommand('web', '0.1.6', 'darwin', undefined, 'mirror')!.args).toEqual([
+      'plugin',
+      '--profile',
+      'web',
+      'add',
+      'dsh-lan-web-access@0.1.6',
+      '--registry=https://registry.npmmirror.com',
+    ]);
+    expect(resolveUpdateCommand('web', '0.1.6', 'darwin', undefined, 'github')!.args.at(-1)).toBe(
+      'github:Colin900726/dsh-lan-web-access#v0.1.6',
+    );
+  });
   it('Given 版本号里有 shell 能解释的字符，Then 不拼进命令行', () => {
     expect(resolveUpdateCommand('web', '0.1.5&calc', 'win32', undefined)).toBeUndefined();
     expect(resolveUpdateCommand('web', '0.2.0-rc.1', 'win32', undefined)).toBeDefined();

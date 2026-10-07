@@ -4,9 +4,12 @@
  * 不用 `dsh plugin update`：它就是 pnpm update，只在安装时记下的范围里升级 —— 从 GitHub 带标签装的
  * （`github:…#v0.1.2`）会原样重装旧版，npm 装的记成 `^0.1.3` 也升不到 0.2.0，刚发布的版本还会被
  * pnpm 的「新版本冷静期」挡住，而命令照样成功退出（2026-10-07 Mac Desktop 真机踩到）。装确切版本号
- * 会把来源换成 npm 上这个版本；装完再核对磁盘上的版本号，对不上就报失败，不报「完成」。
+ * 不受这些限制；装完再核对磁盘上的版本号，对不上就报失败，不报「完成」。
  *
- * 版本源默认是 npm；发布到 npm 之前（Q-001）查不到，显示「暂时查不到新版本」，中性，不算错。
+ * 来源不锁死一种（用户 2026-10-07：「优先npm，如果链接不通，网络中断等问题，可以用github的方法…
+ * 总之不能锁死只一种方式」）：依次试 npm 官方源 → 国内镜像 npmmirror → GitHub 上同版本的标签，
+ * 哪个装上了这个版本就停。查最新版本同时问 npm 官方源和国内镜像，取较高的那个。
+ * 都查不到（没发布、超时、断网）显示「暂时查不到新版本」，中性，不算错。
  * 演示用两个环境变量（正常使用不设）：
  * - DSH_REMOTE_ACCESS_REGISTRY：版本源地址，返回 `{"version": "x.y.z"}`；
  * - DSH_REMOTE_ACCESS_UPDATE_CMD：代替更新命令运行的命令（交给系统 shell；此时不核对装上的版本）。
@@ -27,26 +30,42 @@ export const PACKAGE_NAME = 'dsh-lan-web-access';
 /** 查版本超时（R-007 异常处理：8 秒）。 */
 export const CHECK_TIMEOUT_MS = 8000;
 
-function registryUrl(): string {
-  return (
-    process.env.DSH_REMOTE_ACCESS_REGISTRY ??
-    `https://registry.npmjs.org/${encodeURIComponent(PACKAGE_NAME)}/latest`
-  );
+export const NPM_REGISTRY = 'https://registry.npmjs.org';
+export const MIRROR_REGISTRY = 'https://registry.npmmirror.com';
+export const GITHUB_REPO = 'Colin900726/dsh-lan-web-access';
+
+function versionUrls(): string[] {
+  const fake = process.env.DSH_REMOTE_ACCESS_REGISTRY;
+  if (fake) return [fake];
+  const path = `/${encodeURIComponent(PACKAGE_NAME)}/latest`;
+  return [NPM_REGISTRY + path, MIRROR_REGISTRY + path];
 }
 
-/** 查最新版本：有新版本 → available；一样或更旧 → latest；查不到（没发布、超时、断网）→ unavailable。 */
-export async function checkLatestVersion(current: string): Promise<UpdateState> {
+async function fetchVersion(url: string, signal: AbortSignal): Promise<string | undefined> {
   try {
-    const res = await fetch(registryUrl(), { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
-    if (!res.ok) return { state: 'unavailable', current };
+    const res = await fetch(url, { signal });
+    if (!res.ok) return undefined;
     const data = (await res.json()) as { version?: unknown };
-    if (typeof data.version !== 'string') return { state: 'unavailable', current };
-    return compareVersions(data.version, current) > 0
-      ? { state: 'available', current, latest: data.version }
-      : { state: 'latest', current, latest: current };
+    return typeof data.version === 'string' ? data.version : undefined;
   } catch {
-    return { state: 'unavailable', current };
+    return undefined;
   }
+}
+
+/**
+ * 查最新版本（几个源同时问，取最高的）：有新版本 → available；一样或更旧 → latest；
+ * 都查不到（没发布、超时、断网）→ unavailable。
+ */
+export async function checkLatestVersion(current: string): Promise<UpdateState> {
+  const signal = AbortSignal.timeout(CHECK_TIMEOUT_MS);
+  const found = (await Promise.all(versionUrls().map((u) => fetchVersion(u, signal)))).filter(
+    (v): v is string => v !== undefined,
+  );
+  if (found.length === 0) return { state: 'unavailable', current };
+  const newest = found.reduce((a, b) => (compareVersions(b, a) > 0 ? b : a));
+  return compareVersions(newest, current) > 0
+    ? { state: 'available', current, latest: newest }
+    : { state: 'latest', current, latest: current };
 }
 
 interface UpdateCommand {
@@ -79,16 +98,28 @@ const SAFE_PROFILE = /^[A-Za-z0-9_-]+$/;
 /** 版本号会拼进命令行（Windows 经 shell）：只认 x.y.z 和可选的预发布后缀。 */
 const SAFE_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 
+/** 一键更新依次尝试的安装来源。 */
+export type UpdateSource = 'npm' | 'mirror' | 'github';
+export const UPDATE_SOURCES: readonly UpdateSource[] = ['npm', 'mirror', 'github'];
+
+/** 某个来源下 `dsh plugin add` 的参数（不含 `plugin --profile <p> add`）。 */
+function addArgs(version: string, source: UpdateSource): string[] {
+  if (source === 'github') return [`github:${GITHUB_REPO}#v${version}`];
+  const spec = `${PACKAGE_NAME}@${version}`;
+  return source === 'mirror' ? [spec, `--registry=${MIRROR_REGISTRY}`] : [spec];
+}
+
 export function resolveUpdateCommand(
   profile: string,
   version: string,
   platform: NodeJS.Platform = process.platform,
   resourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath,
+  source: UpdateSource = 'npm',
 ): UpdateCommand | undefined {
   const fake = process.env.DSH_REMOTE_ACCESS_UPDATE_CMD;
   if (fake) return { cmd: fake, args: [], shell: true };
   if (!SAFE_VERSION.test(version)) return undefined;
-  const args = ['plugin', '--profile', profile, 'add', `${PACKAGE_NAME}@${version}`];
+  const args = ['plugin', '--profile', profile, 'add', ...addArgs(version, source)];
   if (profile === 'desktop' && resourcesPath !== undefined) {
     return {
       cmd: process.execPath,
@@ -126,36 +157,20 @@ export function installedVersion(): string | undefined {
   }
 }
 
-/** 运行更新命令，装上 `version` 这个确切版本。超时、失败都只回报，不动设置。 */
-export function runUpdate(
-  profile: string,
-  version: string,
-  options: {
-    timeoutMs?: number;
-    /** 装完核对版本号；默认核对，只有演示变量代替更新命令时不核对。 */
-    verify?: boolean;
-    readInstalled?: () => string | undefined;
-  } = {},
-): Promise<UpdateResult> {
-  const {
-    timeoutMs = 120_000,
-    verify = process.env.DSH_REMOTE_ACCESS_UPDATE_CMD === undefined,
-    readInstalled = installedVersion,
-  } = options;
+/** 跑一次命令：退出码（启动失败为 undefined）、输出、启动错误。 */
+function runOnce(
+  command: UpdateCommand,
+  timeoutMs: number,
+): Promise<{ code: number | null | undefined; output: string; error?: NodeJS.ErrnoException }> {
   return new Promise((resolve) => {
-    const command = resolveUpdateCommand(profile, version);
-    if (command === undefined) {
-      resolve({
-        ok: false,
-        reason: 'no-command',
-        output: `profile 名或版本号不能拼进命令行：${profile} ${version}`,
-      });
-      return;
-    }
     const { cmd, args, env, shell } = command;
     let output = '';
     let settled = false;
-    const finish = (r: UpdateResult): void => {
+    const finish = (r: {
+      code: number | null | undefined;
+      output: string;
+      error?: NodeJS.ErrnoException;
+    }): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -164,32 +179,69 @@ export function runUpdate(
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env, shell });
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, reason: 'failed', output: `${output}\n[timeout]` });
+      finish({ code: null, output: `${output}\n[timeout]` });
     }, timeoutMs);
     child.stdout.on('data', (d: Buffer) => (output += d.toString()));
     child.stderr.on('data', (d: Buffer) => (output += d.toString()));
     child.on('error', (error: NodeJS.ErrnoException) =>
-      finish({
-        ok: false,
-        reason: error.code === 'ENOENT' ? 'no-command' : 'failed',
-        output: error.message,
-      }),
+      finish({ code: undefined, output: error.message, error }),
     );
-    child.on('close', (code) => {
-      if (code === 0) {
-        // 命令成功不等于装上了新版本（见文件头）：核对磁盘上的版本号。
-        const got = verify ? readInstalled() : version;
-        if (got === version) finish({ ok: true, output });
-        else
-          finish({
-            ok: false,
-            reason: 'failed',
-            output: `${output}\n更新命令已完成，但装上的版本是 ${got ?? '未知'}，不是 ${version}`,
-          });
-      }
-      // shell 里找不到命令退出码是 127（Windows cmd 是 9009）。
-      else if (code === 127 || code === 9009) finish({ ok: false, reason: 'no-command', output });
-      else finish({ ok: false, reason: NETWORK_ERROR.test(output) ? 'network' : 'failed', output });
-    });
+    child.on('close', (code) => finish({ code, output }));
   });
+}
+
+const SOURCE_LABEL: Record<UpdateSource, string> = {
+  npm: 'npm 官方源',
+  mirror: '国内镜像 npmmirror',
+  github: 'GitHub',
+};
+
+/**
+ * 运行更新，装上 `version` 这个确切版本。依次试 npm 官方源 → 国内镜像 → GitHub，
+ * 某个来源命令成功且磁盘上的版本号对上了就停；都不行才报失败。超时、失败都只回报，不动设置。
+ */
+export async function runUpdate(
+  profile: string,
+  version: string,
+  options: {
+    /** 每个来源的超时。 */
+    timeoutMs?: number;
+    /** 装完核对版本号；默认核对，只有演示变量代替更新命令时不核对。 */
+    verify?: boolean;
+    readInstalled?: () => string | undefined;
+    sources?: readonly UpdateSource[];
+  } = {},
+): Promise<UpdateResult> {
+  const {
+    timeoutMs = 120_000,
+    verify = process.env.DSH_REMOTE_ACCESS_UPDATE_CMD === undefined,
+    readInstalled = installedVersion,
+    sources = process.env.DSH_REMOTE_ACCESS_UPDATE_CMD === undefined ? UPDATE_SOURCES : ['npm'],
+  } = options;
+  let log = '';
+  let networkOnly = true;
+  for (const source of sources) {
+    const command = resolveUpdateCommand(profile, version, undefined, undefined, source);
+    if (command === undefined)
+      return {
+        ok: false,
+        reason: 'no-command',
+        output: `profile 名或版本号不能拼进命令行：${profile} ${version}`,
+      };
+    const r = await runOnce(command, timeoutMs);
+    log += `\n[${SOURCE_LABEL[source]}]\n${r.output}`;
+    // 命令本身找不到：换来源也没用。shell 里找不到命令退出码是 127（Windows cmd 是 9009）。
+    if (r.error?.code === 'ENOENT' || r.code === 127 || r.code === 9009)
+      return { ok: false, reason: 'no-command', output: log };
+    if (r.code === 0) {
+      // 命令成功不等于装上了新版本（见文件头）：核对磁盘上的版本号。
+      const got = verify ? readInstalled() : version;
+      if (got === version) return { ok: true, output: log };
+      log += `\n更新命令已完成，但装上的版本是 ${got ?? '未知'}，不是 ${version}`;
+      networkOnly = false;
+      continue;
+    }
+    if (!NETWORK_ERROR.test(r.output)) networkOnly = false;
+  }
+  return { ok: false, reason: networkOnly ? 'network' : 'failed', output: log };
 }

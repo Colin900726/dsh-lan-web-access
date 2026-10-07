@@ -39,3 +39,9 @@ jobs:
       - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       - run: npm publish --access public
+
+      # 让国内镜像 npmmirror 马上同步新版本（国内用户安装、一键更新会用到它；不同步要等它自己轮询）。
+      # 同步失败不影响发布结果。
+      - name: 通知 npmmirror 同步
+        if: success()
+        run: curl -fsS -X PUT "https://registry-direct.npmmirror.com/-/package/dsh-lan-web-access/syncs" || echo "::warning::npmmirror 同步请求失败，稍后它会自己同步"
