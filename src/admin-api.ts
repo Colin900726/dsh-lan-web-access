@@ -684,7 +684,7 @@ export function registerAdminApi(rt: Runtime): () => void {
         }
         const target = rt.update.latest;
         rt.update = { state: 'running', current: rt.version, latest: target };
-        const result = await runUpdate(rt.profile);
+        const result = await runUpdate(rt.profile, target);
         rt.update = result.ok
           ? { state: 'done', current: rt.version, latest: target }
           : {
@@ -693,7 +693,7 @@ export function registerAdminApi(rt: Runtime): () => void {
               latest: target,
               reason: result.reason ?? 'failed',
               ...(result.reason === 'no-command'
-                ? { command: manualUpdateCommand(rt.profile) }
+                ? { command: manualUpdateCommand(rt.profile, target) }
                 : {}),
             };
         rt.log.record(

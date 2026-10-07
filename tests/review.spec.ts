@@ -89,8 +89,8 @@ describe('访问记录不被刷掉', () => {
 
 describe('Windows 更新命令不拼入可疑的 profile 名', () => {
   it('Given profile 名带 shell 特殊字符，Then 不生成命令（界面给手动命令）', () => {
-    expect(resolveUpdateCommand('web&calc', 'win32', undefined)).toBeUndefined();
-    expect(resolveUpdateCommand('web', 'win32', undefined)?.cmd).toBe('dsh.cmd');
+    expect(resolveUpdateCommand('web&calc', '0.1.5', 'win32', undefined)).toBeUndefined();
+    expect(resolveUpdateCommand('web', '0.1.5', 'win32', undefined)?.cmd).toBe('dsh.cmd');
   });
 });
 

@@ -293,16 +293,27 @@ describe('R-007 一键更新', () => {
   });
   it('Given 更新命令成功，Then 回报成功', async () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
-    expect(await runUpdate('web')).toMatchObject({ ok: true });
+    expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: true });
   });
   it('Given 找不到更新命令，Then 回报 no-command（界面给手动命令）', async () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 127';
-    expect(await runUpdate('web')).toMatchObject({ ok: false, reason: 'no-command' });
+    expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: false, reason: 'no-command' });
+  });
+  it('Given 更新命令成功退出、但装上的还是旧版本（如 GitHub 钉了标签、pnpm 冷静期），Then 回报失败，不报完成', async () => {
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
+    const r = await runUpdate('web', '9.9.9', { verify: true, readInstalled: () => '0.1.2' });
+    expect(r).toMatchObject({ ok: false, reason: 'failed' });
+    expect(r.output).toContain('装上的版本是 0.1.2，不是 9.9.9');
+  });
+  it('Given 更新命令成功退出、装上的正是新版本，Then 回报成功', async () => {
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
+    const r = await runUpdate('web', '9.9.9', { verify: true, readInstalled: () => '9.9.9' });
+    expect(r).toMatchObject({ ok: true });
   });
   it('Given 更新时断网，Then 回报 network', async () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD =
       'echo getaddrinfo ENOTFOUND registry.npmjs.org; exit 1';
-    expect(await runUpdate('web')).toMatchObject({ ok: false, reason: 'network' });
+    expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: false, reason: 'network' });
   });
   it('Given 打开「关于」有新版本，When 点更新，Then 状态变「完成」、设置不变、记一笔插件更新', async () => {
     answer = { status: 200, body: { version: '9.9.9' } };

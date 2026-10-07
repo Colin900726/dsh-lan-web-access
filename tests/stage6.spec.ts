@@ -11,20 +11,20 @@ afterEach(() => {
 
 describe('R-022 一键更新的命令按系统选', () => {
   it('Given Windows Web，Then 用 dsh.cmd 并经 shell 启动', () => {
-    expect(resolveUpdateCommand('web', 'win32', undefined)).toEqual({
+    expect(resolveUpdateCommand('web', '0.1.5', 'win32', undefined)).toEqual({
       cmd: 'dsh.cmd',
-      args: ['plugin', '--profile', 'web', 'update', 'dsh-lan-web-access'],
+      args: ['plugin', '--profile', 'web', 'add', 'dsh-lan-web-access@0.1.5'],
       shell: true,
     });
   });
   it('Given macOS Web，Then 直接启动 dsh，不经 shell', () => {
-    const c = resolveUpdateCommand('web', 'darwin', undefined);
+    const c = resolveUpdateCommand('web', '0.1.5', 'darwin', undefined)!;
     expect(c.cmd).toBe('dsh');
     expect(c.shell).toBeUndefined();
   });
   it('Given Desktop（两个系统都一样），Then 用 Desktop 自带的运行时启动包里的 cli.js', () => {
     for (const platform of ['win32', 'darwin'] as const) {
-      const c = resolveUpdateCommand('desktop', platform, join('R', 'resources'));
+      const c = resolveUpdateCommand('desktop', '0.1.5', platform, join('R', 'resources'))!;
       expect(c.cmd).toBe(process.execPath);
       expect(c.args[1]).toBe(
         join(
@@ -42,8 +42,14 @@ describe('R-022 一键更新的命令按系统选', () => {
       expect(c.env?.ELECTRON_RUN_AS_NODE).toBe('1');
     }
   });
-  it('Given 找不到更新命令，Then 给出的手动命令带当前版本身份', () => {
-    expect(manualUpdateCommand('web')).toBe('dsh plugin --profile web update dsh-lan-web-access');
+  it('Given 找不到更新命令，Then 给出的手动命令装的是那个确切的新版本', () => {
+    expect(manualUpdateCommand('web', '0.1.5')).toBe(
+      'dsh plugin --profile web add dsh-lan-web-access@0.1.5',
+    );
+  });
+  it('Given 版本号里有 shell 能解释的字符，Then 不拼进命令行', () => {
+    expect(resolveUpdateCommand('web', '0.1.5&calc', 'win32', undefined)).toBeUndefined();
+    expect(resolveUpdateCommand('web', '0.2.0-rc.1', 'win32', undefined)).toBeDefined();
   });
 });
 
