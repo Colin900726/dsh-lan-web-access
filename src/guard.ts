@@ -64,17 +64,27 @@ function isOfficialTokenExchange(req: IncomingMessage): boolean {
  * 插件签发的 cookie 用的是同一把密钥，靠记下的指纹区分；开始记录之前签发的分不清，不认。
  */
 function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings): boolean {
-  const authority = authorityOf(req.headers);
-  if (authority === undefined) return false;
-  const value = readNativeCookie(req.headers, authority);
-  if (value === undefined) return false;
-  const secret = peekSigningSecret(deps.getCredentials());
-  if (secret === undefined) return false;
-  const payload = verifyNativeCookie(value, secret, authority);
-  if (payload === undefined) return false;
+  const verified = validNativeCookie(req, deps);
+  if (verified === undefined) return false;
+  const { value, payload } = verified;
   if (s.mintTrackingSince === null || payload.issuedAt < s.mintTrackingSince) return false;
   const fingerprint = nativeCookieFingerprint(value);
   return !s.pluginMintedCookies.some((x) => x.h === fingerprint);
+}
+
+/** 带着签名有效的 dsh cookie（不管是 dsh 还是插件签的），返回它的值和内容。 */
+function validNativeCookie(
+  req: IncomingMessage,
+  deps: GuardDeps,
+): { value: string; payload: { issuedAt: number; expiresAt: number } } | undefined {
+  const authority = authorityOf(req.headers);
+  if (authority === undefined) return undefined;
+  const value = readNativeCookie(req.headers, authority);
+  if (value === undefined) return undefined;
+  const secret = peekSigningSecret(deps.getCredentials());
+  if (secret === undefined) return undefined;
+  const payload = verifyNativeCookie(value, secret, authority);
+  return payload === undefined ? undefined : { value, payload };
 }
 
 /** 是不是本插件的局域网入口转发来的（入口已经查过设备和登录）。 */
@@ -136,20 +146,28 @@ export async function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): 
 }
 
 /**
- * 本机的管理操作（改设置、改密码等）是否放行。本机免登录开着时都放行；关着时要有有效登录，
- * 或是 dsh 自己签发的 cookie（Desktop 窗口）。调用前已确认是本机请求。
+ * 本机的管理操作（改设置、改密码等）是否放行。调用前已确认是本机请求。
+ * - 插件在接管、本机免登录开着：放行；
+ * - 本机免登录关着：要有有效登录，或 dsh 自己签发的 cookie（Desktop 窗口）；
+ * - 插件没在接管（总开关关了、安全退出）：按 dsh 官方认证来，要有效登录或签名有效的 dsh cookie，
+ *   免得本机任意程序不带 token 就能把插件重新打开。
  */
 export async function adminAllowed(req: IncomingMessage, deps: GuardDeps): Promise<boolean> {
   const s = deps.getSettings();
-  if (s.allowLoopback) return true;
+  const taking = active(deps);
+  if (taking && s.allowLoopback) return true;
   if (deps.sessions.validate(readSessionToken(req) ?? '') !== undefined) return true;
   if (!isLoopbackHost(req.headers.host)) return false;
-  if (hasDshIssuedCookie(req, deps, s)) return true;
+  const check = (): boolean =>
+    taking
+      ? hasDshIssuedCookie(req, deps, deps.getSettings())
+      : validNativeCookie(req, deps) !== undefined;
+  if (check()) return true;
   const authority = authorityOf(req.headers);
   if (authority === undefined || readNativeCookie(req.headers, authority) === undefined)
     return false;
   if ((await loadSigningSecret(deps.getCredentials())) === undefined) return false;
-  return hasDshIssuedCookie(req, deps, deps.getSettings());
+  return check();
 }
 
 function replyJson(res: ServerResponse, status: number, data: Record<string, unknown>): void {

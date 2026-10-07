@@ -6,12 +6,12 @@
  * - 值：`v1.` + base64url(JSON{version, authority, issuedAt, expiresAt}) + `.` + base64url(HMAC-SHA256)
  * - 签名密钥在 dsh 的 credentials 记录 `client-connection/browser-session` 里，只读不建。
  */
+import { NATIVE_COOKIE_MAX_AGE_SEC } from './shared.ts';
 import type { IncomingMessage } from 'node:http';
 export declare const NATIVE_COOKIE_PREFIX = "dsh-auth-";
 export declare const NATIVE_COOKIE_VERSION = 1;
 export declare const SIGNING_SECRET_BYTES = 32;
-/** 有效期 30 天，和 dsh 一致。 */
-export declare const NATIVE_COOKIE_MAX_AGE_SEC: number;
+export { NATIVE_COOKIE_MAX_AGE_SEC };
 /** 签名密钥所在的 credentials 记录。 */
 export declare const SIGNING_SECRET_RECORD: import("@deepseek-ai/dsh-credentials").CredentialKey;
 /** 用到的 credentials 接口（只声明需要的部分）。 */

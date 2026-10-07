@@ -30,7 +30,7 @@ export declare const ERROR_CODES: {
     readonly wrongPassword: "wrong-password";
     /** 错太多次，要等（带 retryAfter：还要等几秒）。 */
     readonly locked: "locked";
-    /** 新密码不够 12 位。 */
+    /** 新密码不够 MIN_PASSWORD_LENGTH 位。 */
     readonly tooShort: "too-short";
 };
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -44,6 +44,8 @@ export declare const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
 export declare const MIN_PASSWORD_LENGTH = 12;
 /** 访问记录最多留几条。 */
 export declare const ACCESS_LOG_MAX = 200;
+/** dsh 登录 cookie 的有效期（秒），和 dsh 一致：30 天。 */
+export declare const NATIVE_COOKIE_MAX_AGE_SEC: number;
 /** 登录页「dsh 还没准备好」时每隔几秒自动重试。 */
 export declare const LOGIN_RETRY_SECONDS = 5;
 /** 支持的 dsh 版本范围（和 package.json 的 peerDependencies 一致）。 */

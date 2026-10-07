@@ -7,6 +7,7 @@
 import {
   DEFAULT_SESSION_MAX_AGE_DAYS,
   MIN_PASSWORD_LENGTH,
+  NATIVE_COOKIE_MAX_AGE_SEC,
   SESSION_MAX_AGE_CHOICES,
 } from './shared.ts';
 
@@ -143,6 +144,28 @@ function mintedList(v: unknown): { h: string; exp: number }[] {
       typeof (x as { h?: unknown }).h === 'string' &&
       typeof (x as { exp?: unknown }).exp === 'number',
   );
+}
+
+/** 最多记多少条插件签发的 cookie 指纹（过期的会先清掉）。 */
+export const MAX_MINTED = 1000;
+
+/**
+ * 记下插件新签发的一张 cookie。记录满了要挤掉最旧的：把「开始记录的时间」挪到被挤掉的那些
+ * 签发时间之后，它们从此一律不认——宁可多拒（Desktop 重启一次就好），不能错放。
+ */
+export function addMintRecord(
+  s: Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>,
+  record: { h: string; exp: number },
+  now: number,
+  max = MAX_MINTED,
+): Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'> {
+  const all = [...s.pluginMintedCookies.filter((x) => x.exp > now), record];
+  const dropped = all.slice(0, Math.max(0, all.length - max));
+  const since = dropped.reduce(
+    (t, x) => Math.max(t, x.exp - NATIVE_COOKIE_MAX_AGE_SEC * 1000 + 1),
+    s.mintTrackingSince ?? now,
+  );
+  return { pluginMintedCookies: all.slice(-max), mintTrackingSince: since };
 }
 
 /** 读进来的设置：缺的、不合法的字段用默认值。 */

@@ -32,7 +32,7 @@ export const ERROR_CODES = {
   wrongPassword: 'wrong-password',
   /** 错太多次，要等（带 retryAfter：还要等几秒）。 */
   locked: 'locked',
-  /** 新密码不够 12 位。 */
+  /** 新密码不够 MIN_PASSWORD_LENGTH 位。 */
   tooShort: 'too-short',
 } as const;
 
@@ -49,6 +49,8 @@ export const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
 export const MIN_PASSWORD_LENGTH = 12;
 /** 访问记录最多留几条。 */
 export const ACCESS_LOG_MAX = 200;
+/** dsh 登录 cookie 的有效期（秒），和 dsh 一致：30 天。 */
+export const NATIVE_COOKIE_MAX_AGE_SEC = 30 * 24 * 60 * 60;
 /** 登录页「dsh 还没准备好」时每隔几秒自动重试。 */
 export const LOGIN_RETRY_SECONDS = 5;
 

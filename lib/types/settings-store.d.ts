@@ -8,6 +8,11 @@ export declare class SettingsStore {
     private listeners;
     constructor(initial?: Settings);
     private load;
+    /**
+     * Desktop 和 Web 可能同时在跑、共用这个文件：插件签发 cookie 的记录不能被对方整份覆盖掉，
+     * 写之前把文件里现有的合并进来（去重、去掉过期的），开始记录的时间取较晚的。
+     */
+    private mergeMintRecords;
     private write;
     get(): Settings;
     /** 合并写入并通知监听者（notify 为 false 时只写不通知，用于记录类数据）。 */

@@ -35,8 +35,11 @@ export declare function isAuthorized(req: IncomingMessage, deps: GuardDeps): boo
 /** isAuthorized 的异步版：签名密钥还没读到时（插件刚启动），先等它读完再判一次。 */
 export declare function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
 /**
- * 本机的管理操作（改设置、改密码等）是否放行。本机免登录开着时都放行；关着时要有有效登录，
- * 或是 dsh 自己签发的 cookie（Desktop 窗口）。调用前已确认是本机请求。
+ * 本机的管理操作（改设置、改密码等）是否放行。调用前已确认是本机请求。
+ * - 插件在接管、本机免登录开着：放行；
+ * - 本机免登录关着：要有有效登录，或 dsh 自己签发的 cookie（Desktop 窗口）；
+ * - 插件没在接管（总开关关了、安全退出）：按 dsh 官方认证来，要有效登录或签名有效的 dsh cookie，
+ *   免得本机任意程序不带 token 就能把插件重新打开。
  */
 export declare function adminAllowed(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
 /** 安装守卫，返回撤销函数（插件停用时把改过的东西全部还原）。 */

@@ -19,7 +19,7 @@ pnpm install        # 安装依赖
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint（src + tests）
 npm run format      # prettier 格式化
-npm test            # vitest（192 个用例，不连外网）
+npm test            # vitest（200 个用例，不连外网）
 npm run build       # tsc + tsdown，产物输出到 lib/
 npm run dev         # 构建后启动 dsh web（插件需已用「从源码」方式装进 web profile）
 ```
@@ -47,7 +47,7 @@ dsh-lan-web-access/
 │   ├── *.js                    tsc 产出 —— 服务端部分
 │   ├── types/**                tsc 类型声明
 │   └── client.js (+.map)       tsdown 产出 —— 界面部分，注册进 window.__ModuleLoader__
-├── tests/                      vitest 单元测试（18 个 spec / 192 个用例）
+├── tests/                      vitest 单元测试（18 个 spec / 200 个用例）
 ├── .github/workflows/ci.yml    推送时自动检查：测试、编译、lib/ 与源码一致
 ├── cordis.patch.yml            宿主把本插件插进 Cordis 树的那一行（运行时必需）
 ├── tsconfig.json               服务端部分 + 类型声明的编译设置
@@ -129,11 +129,11 @@ dsh-lan-web-access/
 | `settings.spec.ts` | 设置校验 | 5 |
 | `selfcheck.spec.ts` | 版本比较（含预发布版） | 3 |
 | `lifecycle.spec.ts` | 停用 / 再启用不残留、不报重复路由 | 9 |
-| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 91 |
-| `desktop.spec.ts`、`desktop-cold.spec.ts` | 「本机免登录」关着时 Desktop 不被拦（含运行中关开关）、插件签发的 cookie 不认、管理接口要登录、密钥还没读到时 | 23 |
+| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 98 |
+| `desktop.spec.ts`、`desktop-cold.spec.ts` | 「本机免登录」关着时 Desktop 不被拦（含运行中关开关）、插件签发的 cookie 不认、管理接口要登录、记录满了的处理、密钥还没读到时 | 24 |
 | `review-fixes.spec.ts`、`review.spec.ts` | 代码复核发现的问题的回归测试（CSRF、路径归一绕过、并发登录、长连接空挂、记录被刷掉等） | 21 |
 
-合计 **192 个用例**，不连外网（版本源、更新命令都用本地假的）。
+合计 **200 个用例**，不连外网（版本源、更新命令都用本地假的）。
 
 只跑单个文件：
 

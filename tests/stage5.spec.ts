@@ -12,7 +12,7 @@ import { SettingsStore } from '../src/settings-store.ts';
 import { hashPassword, makeSalt } from '../src/session-store.ts';
 import { dshVersionInRange } from '../src/selfcheck.ts';
 import { checkLatestVersion, runUpdate, UPDATE_SOURCES } from '../src/updater.ts';
-import { fakeCredentials } from './helpers.ts';
+import { dshCookie, fakeCredentials } from './helpers.ts';
 
 let dir: string;
 beforeEach(() => {
@@ -48,8 +48,10 @@ async function call(
   method = 'GET',
   body?: unknown,
   from: { remote: string; host: string } = { remote: '127.0.0.1', host: '127.0.0.1:3080' },
+  cookie?: string,
 ): Promise<{ status: number; body: Record<string, unknown>; cookies: string[] }> {
   const req = fakeReq(method, body, from.remote, from.host);
+  if (cookie !== undefined) (req.headers as Record<string, string>).cookie = cookie;
   let cookies: string[] = [];
   let status = 0;
   let text = '';
@@ -147,7 +149,10 @@ describe('R-008 / R-015 运行检查与安全退出', () => {
     expect((st.lan as { listening: boolean }).listening).toBe(false);
     // 安全退出后插件不再挡请求，由 dsh 自己的 token 认证决定。
     expect(await p.lanRequestPasses()).toBe(true);
-    const logs = (await call(p.routes.get('/api/remote-access/logs')!)).body.logs as {
+    // 这时能看到设置页的浏览器手里都有 dsh 的 cookie（官方 token 登录过）。
+    const logs = (
+      await call(p.routes.get('/api/remote-access/logs')!, 'GET', undefined, undefined, dshCookie())
+    ).body.logs as {
       kind: string;
     }[];
     expect(logs.some((e) => e.kind === 'selfcheck-fail')).toBe(true);
@@ -166,7 +171,10 @@ describe('R-008 / R-015 运行检查与安全退出', () => {
     const p = boot();
     await vi.waitFor(async () => expect((await p.status()).fault).toBe(true));
     delete process.env.DSH_REMOTE_ACCESS_FAKE_FAIL;
-    const res = await call(p.routes.get('/api/remote-access/selfcheck')!, 'POST', {});
+    const selfcheck = p.routes.get('/api/remote-access/selfcheck')!;
+    // 不带任何凭证的本机程序点不了「重新检查」；带 dsh cookie（设置页所在的浏览器）可以。
+    expect((await call(selfcheck, 'POST', {})).status).toBe(401);
+    const res = await call(selfcheck, 'POST', {}, undefined, dshCookie());
     expect(res.body.fault).toBe(false);
     const st = await p.status();
     expect((st.lan as { listening: boolean }).listening).toBe(true);
@@ -213,6 +221,61 @@ describe('R-008 / R-015 运行检查与安全退出', () => {
   });
 });
 
+describe('本机免登录关着时，本机管理接口也要登录（用户 2026-10-07 拍板「堵上」）', () => {
+  const sensitive: [string, string, unknown][] = [
+    ['/api/remote-access/settings', 'POST', { allowLoopback: true }],
+    ['/api/remote-access/settings', 'GET', undefined],
+    ['/api/remote-access/password', 'POST', { password: 'another-long-password' }],
+    ['/api/remote-access/password/clear', 'POST', {}],
+    ['/api/remote-access/kick-all', 'POST', {}],
+    ['/api/remote-access/devices', 'GET', undefined],
+    ['/api/remote-access/logs', 'GET', undefined],
+    ['/api/remote-access/update', 'GET', undefined],
+  ];
+  it('Given 开关关着、本机没登录（开发者工具、命令行），Then 这些接口都回 401 login-required，设置不变', async () => {
+    new SettingsStore().update({
+      passwordHash: hashPassword('a-long-enough-password', makeSalt()),
+      allowLoopback: false,
+    });
+    const p = boot();
+    for (const [path, method, body] of sensitive) {
+      const r = await call(p.routes.get(path)!, method, body);
+      expect([path, r.status, r.body.code]).toEqual([path, 401, 'login-required']);
+    }
+    expect(new SettingsStore().get().allowLoopback).toBe(false);
+    await p.dispose();
+  });
+  it('Given 开关关着、本机用密码登录了，Then 能改设置', async () => {
+    new SettingsStore().update({
+      passwordHash: hashPassword('a-long-enough-password', makeSalt()),
+      allowLoopback: false,
+    });
+    const p = boot();
+    const login = await call(p.routes.get('/api/remote-access/login')!, 'POST', {
+      password: 'a-long-enough-password',
+    });
+    const sid = login.cookies.find((c) => c.startsWith('dsh_sid='))!.split(';')[0]!;
+    const r = await call(
+      p.routes.get('/api/remote-access/settings')!,
+      'POST',
+      { allowLoopback: true },
+      undefined,
+      sid,
+    );
+    expect(r.status).toBe(200);
+    expect(new SettingsStore().get().allowLoopback).toBe(true);
+    await p.dispose();
+  });
+  it('Given 总开关关着（回到官方 token 方式），When 本机程序不带任何凭证想把插件重新打开，Then 401', async () => {
+    new SettingsStore().update({ enabled: false, allowLoopback: true });
+    const p = boot();
+    const r = await call(p.routes.get('/api/remote-access/settings')!, 'POST', { enabled: true });
+    expect(r.status).toBe(401);
+    expect(new SettingsStore().get().enabled).toBe(false);
+    await p.dispose();
+  });
+});
+
 describe('最终复核：本机登录与主端口', () => {
   it('Given 本机免登录关着、本机用密码登录了，When 改任意设置，Then 本机的登录还在（原来会被当成不在列表里踢掉）', async () => {
     new SettingsStore().update({
@@ -227,7 +290,10 @@ describe('最终复核：本机登录与主端口', () => {
     expect(login.status).toBe(200);
     const sid = login.cookies.find((c) => c.startsWith('dsh_sid='))!.split(';')[0]!;
     expect(sid).toBeTruthy();
-    await call(p.routes.get('/api/remote-access/settings')!, 'POST', { sessionMaxAgeDays: 7 });
+    const settingsRoute = p.routes.get('/api/remote-access/settings')!;
+    const changed = await call(settingsRoute, 'POST', { sessionMaxAgeDays: 7 }, undefined, sid);
+    expect(changed.status).toBe(200);
+    expect(new SettingsStore().get().sessionMaxAgeDays).toBe(7);
     const st = await new Promise<Record<string, unknown>>((resolve) => {
       const req = fakeReq('GET', undefined, '127.0.0.1', '127.0.0.1:3080');
       (req.headers as Record<string, string>).cookie = sid;
@@ -433,5 +499,35 @@ describe('R-007 版本从哪查、装不上换哪个来源（不锁死一种来�
     expect(r.ok).toBe(true);
     expect(r.output).toContain('装上的版本是 0.1.5');
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe('Desktop 和 Web 同时在跑、共用设置文件', () => {
+  it('Given 两个进程各自记下插件签发的 cookie，Then 谁也不会把对方的记录覆盖掉', () => {
+    const a = new SettingsStore();
+    const b = new SettingsStore();
+    const exp = Date.now() + 1e9;
+    a.update({ pluginMintedCookies: [{ h: 'from-a', exp }] }, false);
+    b.update({ pluginMintedCookies: [{ h: 'from-b', exp }] }, false);
+    b.update({ sessionMaxAgeDays: 7 });
+    const hashes = new SettingsStore()
+      .get()
+      .pluginMintedCookies.map((x) => x.h)
+      .sort();
+    expect(hashes).toEqual(['from-a', 'from-b']);
+  });
+});
+
+describe('一键更新超时', () => {
+  it('Given 更新命令卡住（还起了子进程），When 超时，Then 整棵进程树都被杀掉，按网络问题回报', async () => {
+    const marker = `dsh-upd-timeout-${process.pid}-${Date.now()}`;
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `bash -c 'exec -a ${marker} sleep 60' & wait`;
+    const r = await runUpdate('web', '9.9.9', { timeoutMs: 500, sources: ['npm'] });
+    expect(r).toMatchObject({ ok: false, reason: 'network' });
+    const { execSync } = await import('node:child_process');
+    const left = execSync(`ps -ax -o command= | grep -c '[${marker[0]}]${marker.slice(1)}' || true`)
+      .toString()
+      .trim();
+    expect(left).toBe('0');
   });
 });

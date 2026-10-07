@@ -31,6 +31,7 @@ import {
   useSave,
   TOAST_MS,
   type Toast,
+  useSelectSetting,
 } from './ui.tsx';
 import { css, ROOT_CLASS } from './styles.ts';
 
@@ -550,7 +551,6 @@ function LanEntry({
   const alertTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useMounted();
   const [, savePort, portSaving] = useSave(onChanged);
-  const [, saveNic, nicSaving] = useSave(onChanged);
 
   useEffect(() => setPortText(String(status.lan.port)), [status.lan.port]);
   useEffect(() => () => clearTimeout(alertTimer.current), []);
@@ -592,35 +592,24 @@ function LanEntry({
     else showToast({ kind: 'bad', text: failureText(result) });
   };
 
-  // 网卡：选完立刻显示新值；上一次还没保存完就排队，以最后一次为准；失败弹回并原地说原因。
-  const [nicShown, setNicShown] = useState<string | undefined>();
-  const nicQueued = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (nicShown === status.lan.host && !nicSaving() && nicQueued.current === undefined)
-      setNicShown(undefined);
-  }, [status.lan.host, nicShown, nicSaving]);
-  const sendNic = async (host: string): Promise<void> => {
-    setNicAlert(undefined);
-    const result = await saveNic({ lanHost: host });
-    const next = nicQueued.current;
-    if (next !== undefined) {
-      nicQueued.current = undefined;
-      await sendNic(next);
-      return;
-    }
-    if (result === undefined || result.ok || !mounted.current) return;
-    setNicShown(undefined);
-    if (result.kind === 'rejected' && result.code === ERROR_CODES.portInUse)
-      setNicAlert(t.conn.portInUse(status.lan.port));
-    else if (result.kind === 'rejected' && result.code === ERROR_CODES.hostUnavailable)
-      setNicAlert(t.conn.nicMissing);
-    else showToast({ kind: 'bad', text: failureText(result) });
-  };
-  const changeNic = (host: string): void => {
-    setNicShown(host);
-    if (nicSaving()) nicQueued.current = host;
-    else void sendNic(host);
-  };
+  // 网卡：选完立刻显示新值，以最后一次为准；端口被占、网卡不在了原地说原因。
+  const [nicValue, changeNic] = useSelectSetting(
+    status.lan.host,
+    'lanHost',
+    onChanged,
+    showToast,
+    (f) => {
+      if (f.kind === 'rejected' && f.code === ERROR_CODES.portInUse) {
+        setNicAlert(t.conn.portInUse(status.lan.port));
+        return true;
+      }
+      if (f.kind === 'rejected' && f.code === ERROR_CODES.hostUnavailable) {
+        setNicAlert(t.conn.nicMissing);
+        return true;
+      }
+      return false;
+    },
+  );
 
   const ips = status.lanIps ?? [];
   const nicMissingNow = status.lan.hostMissing || status.lan.error === 'host-unavailable';
@@ -667,8 +656,11 @@ function LanEntry({
           <select
             className="select"
             aria-label={t.conn.nicLabel}
-            value={nicShown ?? status.lan.host}
-            onChange={(e) => changeNic(e.target.value)}
+            value={nicValue}
+            onChange={(e) => {
+              setNicAlert(undefined);
+              changeNic(e.target.value);
+            }}
           >
             <option value="">{t.conn.nicAll}</option>
             {ips.map((i) => (

@@ -86,6 +86,10 @@ export function createGateway(rt: Runtime): GatewayHandle {
     }
   }
 
+  /**
+   * 转发给 dsh 用的本机 cookie：每次现签，只放在转发请求的头里，响应里的 dsh cookie 都会被过滤掉，
+   * 设备拿不到，所以不记进插件签发记录（每个请求都记会把记录很快挤满）。
+   */
   async function mintLoopbackCookie(): Promise<string | undefined> {
     const secret = await loadSigningSecret(getCredentials());
     if (secret === undefined) return undefined;

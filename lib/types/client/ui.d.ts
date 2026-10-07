@@ -59,7 +59,9 @@ export declare function useSave(onSaved: () => void, path?: string): [
     isSaving: () => boolean
 ];
 /** 下拉选择的保存：以最后一次选的为准，上一次还在保存时排队；失败弹回并提示。 */
-export declare function useSelectSetting<T extends string | number>(serverValue: T, key: string, onSaved: () => void, showToast: (toast: Toast) => void): [value: T, change: (next: T) => void];
+export declare function useSelectSetting<T extends string | number>(serverValue: T, key: string, onSaved: () => void, showToast: (toast: Toast) => void, 
+/** 失败时自己说原因（返回 true 表示已处理），不给就弹通用提示条。 */
+onFailed?: (failure: SaveFailure) => boolean): [value: T, change: (next: T) => void];
 /** 开关。保存中用 aria-disabled 而不是原生 disabled，键盘焦点不会丢。 */
 export declare function Switch({ checked, label, busy, onToggle, }: {
     checked: boolean;

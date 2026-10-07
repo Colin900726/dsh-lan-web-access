@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver';
 import { adminAllowed, installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
 import { SessionManager } from '../src/session-store.ts';
-import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
+import { addMintRecord, DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import {
   issueNativeCookie,
   loadSigningSecret,
@@ -263,5 +263,35 @@ describe('本机免登录关着时，管理操作也要登录（用户 2026-10-0
   it('Given 开关关着、用密码登录过的本机浏览器，Then 放行', async () => {
     const token = deps.sessions.create('admin', '127.0.0.1', 'UA');
     expect(await adminAllowed(req({ cookie: `dsh_sid=${token}` }), deps)).toBe(true);
+  });
+});
+
+describe('插件签发记录满了：被挤掉的那些不能变成「dsh 签发的」', () => {
+  it('Given 记录已满，When 再签一张挤掉最旧的，Then 开始记录的时间挪到它之后，那张 cookie 不再放行', () => {
+    const old = cookieAt(Date.now() - 5000);
+    const fresh = cookieAt(Date.now());
+    const day = 86_400_000;
+    let s: Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'> = {
+      pluginMintedCookies: [],
+      mintTrackingSince: SINCE,
+    };
+    s = addMintRecord(
+      s,
+      { h: nativeCookieFingerprint(old.value), exp: Date.now() - 5000 + 30 * day },
+      Date.now(),
+      1,
+    );
+    s = addMintRecord(
+      s,
+      { h: nativeCookieFingerprint(fresh.value), exp: Date.now() + 30 * day },
+      Date.now(),
+      1,
+    );
+    expect(s.pluginMintedCookies).toHaveLength(1);
+    Object.assign(settings, s);
+    expect(isAuthorized(req({ cookie: old.header }), deps)).toBe(false);
+    expect(isAuthorized(req({ cookie: fresh.header }), deps)).toBe(false);
+    // dsh 之后签发的照常认
+    expect(isAuthorized(req({ cookie: cookieAt(Date.now() - 1000).header }), deps)).toBe(true);
   });
 });

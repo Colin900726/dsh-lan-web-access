@@ -78,5 +78,15 @@ export declare function defaultLanPort(mainPort: number): number;
 export declare function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, mainPort: number): number;
 /** 局域网端口是否可用：在范围内，且不等于 dsh 主端口。 */
 export declare function isValidPort(port: unknown, mainPort: number): boolean;
+/** 最多记多少条插件签发的 cookie 指纹（过期的会先清掉）。 */
+export declare const MAX_MINTED = 1000;
+/**
+ * 记下插件新签发的一张 cookie。记录满了要挤掉最旧的：把「开始记录的时间」挪到被挤掉的那些
+ * 签发时间之后，它们从此一律不认——宁可多拒（Desktop 重启一次就好），不能错放。
+ */
+export declare function addMintRecord(s: Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>, record: {
+    h: string;
+    exp: number;
+}, now: number, max?: number): Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>;
 /** 读进来的设置：缺的、不合法的字段用默认值。 */
 export declare function normalizeSettings(raw: unknown): Settings;

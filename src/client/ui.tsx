@@ -246,6 +246,8 @@ export function useSelectSetting<T extends string | number>(
   key: string,
   onSaved: () => void,
   showToast: (toast: Toast) => void,
+  /** 失败时自己说原因（返回 true 表示已处理），不给就弹通用提示条。 */
+  onFailed?: (failure: SaveFailure) => boolean,
 ): [value: T, change: (next: T) => void] {
   const [shown, setShown] = useState<T | undefined>();
   const [, save, isSaving] = useSave(onSaved);
@@ -264,7 +266,7 @@ export function useSelectSetting<T extends string | number>(
     }
     if (result !== undefined && !result.ok) {
       setShown(undefined);
-      showToast({ kind: 'bad', text: failureText(result) });
+      if (onFailed?.(result) !== true) showToast({ kind: 'bad', text: failureText(result) });
     }
   };
   const change = (next: T): void => {

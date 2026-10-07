@@ -24,7 +24,7 @@ import {
 } from './guard.ts';
 import { registerAdminApi, jsonResponse } from './admin-api.ts';
 import { createGateway, whitelistAllows, type GatewayHandle } from './gateway.ts';
-import { effectiveLanPort, defaultLanPort } from './settings.ts';
+import { addMintRecord, defaultLanPort, effectiveLanPort } from './settings.ts';
 import { isLoopbackAddress } from './trust.ts';
 import { listLanIps } from './admin-api.ts';
 import type { LanState } from './shared.ts';
@@ -71,8 +71,6 @@ function detectProfile(ctx: Context): string {
 
 /** 启动时等 dsh 登录签名就绪的次数（每次 1 秒）。 */
 const STARTUP_WAIT_TRIES = 15;
-/** 最多记多少条插件签发的 cookie 指纹（过期的会先清掉）。 */
-const MAX_MINTED = 5000;
 /** 安全退出期间自动重查的间隔。 */
 const FAULT_RECHECK_MS = 30_000;
 
@@ -93,7 +91,7 @@ export function apply(ctx: Context, _config: Config): void {
     maxAgeDays: settings.sessionMaxAgeDays,
   });
   const rateLimiter = createRateLimiter();
-  const log = new AccessLog(200);
+  const log = new AccessLog();
 
   // 每次现取：credentials 可能比本插件晚就绪。
   const getCredentials = (): CredentialsLike | undefined => {
@@ -132,11 +130,9 @@ export function apply(ctx: Context, _config: Config): void {
     update: { state: 'idle', current: version },
     gatewayToken: randomBytes(32).toString('hex'),
     recordPluginMint: (fingerprint, expiresAt) => {
-      const now = Date.now();
-      const kept = settingsStore.get().pluginMintedCookies.filter((x) => x.exp > now);
       // 只写不通知：记一条指纹不算改设置，不用重跑运行检查。
       settingsStore.update(
-        { pluginMintedCookies: [...kept, { h: fingerprint, exp: expiresAt }].slice(-MAX_MINTED) },
+        addMintRecord(settingsStore.get(), { h: fingerprint, exp: expiresAt }, Date.now()),
         false,
       );
     },

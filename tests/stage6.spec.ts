@@ -210,6 +210,25 @@ describe('R-007 只填包名安装总是装最新版：pnpm 冷静期放行名�
       'minimumReleaseAgeExclude:\n- dsh-lan-web-access\n- foo@1.0.0\n',
     );
   });
+  it('Given 认不出列表键的写法（文件开头有 BOM、键加了引号），Then 不动文件，不会写出第二个同名键', () => {
+    for (const text of [
+      '\uFEFFminimumReleaseAgeExclude:\n  - dsh-lan-web-access@0.1.4\n',
+      '"minimumReleaseAgeExclude":\n  - dsh-lan-web-access@0.1.4\n',
+    ]) {
+      const file = tmp(text);
+      expect(allowLatestInstall(file)).toBe(false);
+      expect(readFileSync(file, 'utf8')).toBe(text);
+    }
+  });
+  it('Given 换行混用（有的行 CRLF、有的 LF），Then 统一用 LF，不会把 LF 行改成 CRLF', () => {
+    const file = tmp(
+      'packages:\r\n  - .\nminimumReleaseAgeExclude:\n  - dsh-lan-web-access@0.1.4\n',
+    );
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      'packages:\n  - .\nminimumReleaseAgeExclude:\n  - dsh-lan-web-access\n',
+    );
+  });
   it('Given 从源码目录运行（不在 dsh profile 的 node_modules 里），Then 不去找、不改任何文件', () => {
     expect(allowLatestInstall()).toBe(false);
   });

@@ -158,14 +158,15 @@ interface RunResult {
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
   try {
-    if (process.platform === 'win32') spawn('taskkill', ['/T', '/F', '/PID', String(pid)]);
+    if (process.platform === 'win32')
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)]).on('error', () => undefined);
     else process.kill(-pid, 'SIGKILL');
   } catch {
     // 进程已经退出。
   }
 }
 
-/** 跑一次命令，返回退出码和输出。超时就杀掉整棵进程树，等它真的退出了才返回。 */
+/** 跑一次命令，返回退出码和输出。超时就杀掉整棵进程树，等它退出（最多再等 10 秒）才返回。 */
 function runOnce(command: UpdateCommand, timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve) => {
     const { cmd, args, env, shell } = command;
@@ -294,7 +295,7 @@ const IN_BLOCK = /^(\s|-|#|$)/;
  * pnpm 默认不装发布不到一天的版本，每装一个新版本就往 `minimumReleaseAgeExclude` 名单加一条
  * `dsh-lan-web-access@x.y.z`；名单里本包有多条时它只认第一条，删了重装就会装回旧版。
  * 这里把名单里本插件的条目换成一条不带版本号的，对所有版本放行。别的条目、别的键都不动，
- * 换行方式和缩进照原样；名单是单行写法（`[a, b]`）时不动。
+ * 缩进照原样；整个文件都是 CRLF 才用 CRLF，否则用 LF。名单是单行写法、或认不出写法时不动。
  * @returns 有没有改动文件
  */
 export function allowLatestInstall(file: URL | undefined = profileWorkspaceFile()): boolean {
@@ -305,10 +306,11 @@ export function allowLatestInstall(file: URL | undefined = profileWorkspaceFile(
   } catch {
     return false;
   }
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const eol = text.includes('\r\n') && !/[^\r]\n|^\n/.test(text) ? '\r\n' : '\n';
   const lines = text.split(/\r?\n/);
-  if (lines.some((l) => /^minimumReleaseAgeExclude:[ \t]*\S/.test(l))) return false;
   const key = lines.findIndex((l) => LIST_KEY.test(l));
+  // 名单是单行写法（`[a, b]`），或有这个键但认不出写法（带 BOM、加了引号……）：不动，免得写出重复的键。
+  if (key === -1 && text.includes('minimumReleaseAgeExclude')) return false;
   if (key === -1) {
     while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
     lines.push('minimumReleaseAgeExclude:', `  - ${PACKAGE_NAME}`, '');
