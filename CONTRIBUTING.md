@@ -19,7 +19,7 @@ pnpm install        # 安装依赖
 npm run typecheck   # tsc --noEmit
 npm run lint        # eslint（src + tests）
 npm run format      # prettier 格式化
-npm test            # vitest（171 个用例，不连外网）
+npm test            # vitest（192 个用例，不连外网）
 npm run build       # tsc + tsdown，产物输出到 lib/
 npm run dev         # 构建后启动 dsh web（插件需已用「从源码」方式装进 web profile）
 ```
@@ -47,7 +47,7 @@ dsh-lan-web-access/
 │   ├── *.js                    tsc 产出 —— 服务端部分
 │   ├── types/**                tsc 类型声明
 │   └── client.js (+.map)       tsdown 产出 —— 界面部分，注册进 window.__ModuleLoader__
-├── tests/                      vitest 单元测试（18 个 spec / 171 个用例）
+├── tests/                      vitest 单元测试（18 个 spec / 192 个用例）
 ├── .github/workflows/ci.yml    推送时自动检查：测试、编译、lib/ 与源码一致
 ├── cordis.patch.yml            宿主把本插件插进 Cordis 树的那一行（运行时必需）
 ├── tsconfig.json               服务端部分 + 类型声明的编译设置
@@ -110,7 +110,7 @@ dsh-lan-web-access/
 - **`trust.ts`**：「本机」要求 TCP 对端与 `Host` 头**同时为回环**，且不采信 `X-Forwarded-For` 等可伪造头。
 - **`gateway.ts`**：允许列表、来源和会话校验**必须在转发之前**完成，路径先按 URL 规则归一再判断 —— 任何漏转发都等于放进一个本机身份。
 - **`guard.ts`**：主服务上只认回环对端；局域网入口转发的请求凭本进程令牌（`x-dsh-remote-gateway`，常量时间比较）认出。公共路由（`/login`、`/api/remote-access/*`）不包装。
-- **「本机免登录」关着时 Desktop 不能被拦**：Desktop 启动时用 dsh 的 token 换 cookie（`GET /?token=…`，要求 dsh 回 303 + Set-Cookie，否则 Desktop 报 `Desktop Host authentication failed` 退出），之后凭这张 dsh 签发的 cookie 访问。`guard.ts` 因此放行官方 token 交换，并认「签发时间不早于关掉时刻、且不是插件在关着期间替密码登录签发的」dsh cookie（见 `hasDshIssuedCookie`、`tests/desktop.spec.ts`）。校验要用 dsh 的签名密钥：插件启动时就读，请求来时还没读到则先等读完再判（`isAuthorizedAsync`、`tests/desktop-cold.spec.ts`），否则 Desktop 第一个请求会被拒、报 `desktop welcome: Web authentication failed`。
+- **「本机免登录」关着时 Desktop 不能被拦**：Desktop 启动时用 dsh 的 token 换 cookie（`GET /?token=…`，要求 dsh 回 303 + Set-Cookie，否则 Desktop 报 `Desktop Host authentication failed` 退出），之后凭这张 dsh 签发的 cookie 访问。`guard.ts` 因此放行官方 token 交换，并认 dsh 自己签发的 cookie。插件签发的 cookie 用的是同一把密钥，所以插件每签一张都记下指纹（`pluginMintedCookies`），只拒这些；开始记录（`mintTrackingSince`）之前签发的分不清来源，不认（见 `hasDshIssuedCookie`、`tests/desktop.spec.ts`）。不能按「关掉开关的时刻」一刀切：Desktop 窗口的 cookie 是启动时签的，运行中关开关会把它也拒掉。「本机免登录」关着时，本机管理接口也走同样的判断（`adminAllowed`）。校验要用 dsh 的签名密钥：插件启动时就读，请求来时还没读到则先等读完再判（`isAuthorizedAsync`、`tests/desktop-cold.spec.ts`），否则 Desktop 第一个请求会被拒、报 `desktop welcome: Web authentication failed`。
 - **`native-cookie.ts`**：格式必须与上游**逐字节一致**；读不到签名密钥时**跳过补签**，让请求落回官方 token 认证（安全关闭，而非放开）。
 - **敏感操作**（改设置 / 密码 / 允许列表 / 更新 / 踢下线）只认 `isLocalRequest`：回环且不带入口令牌、Origin 完全同源、`Sec-Fetch-Site` 只能是 same-origin / none、请求体必须是 JSON。
 - **dsh 宿主的全局样式**：dsh 页面给所有元素设了 `corner-shape: superellipse(1.5)`、给 body 设了 `text-autospace: normal`，插件在 `.dla` 下改回 `round` 和 `no-autospace`，否则圆角变方、中英文之间被加空格。
@@ -129,11 +129,11 @@ dsh-lan-web-access/
 | `settings.spec.ts` | 设置校验 | 5 |
 | `selfcheck.spec.ts` | 版本比较（含预发布版） | 3 |
 | `lifecycle.spec.ts` | 停用 / 再启用不残留、不报重复路由 | 9 |
-| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 78 |
-| `desktop.spec.ts`、`desktop-cold.spec.ts` | 「本机免登录」关着时 Desktop 不被拦：token 交换、dsh 签发的 cookie、密钥还没读到时 | 15 |
+| `stage1.spec.ts` … `stage6.spec.ts` | 各开发阶段的验收条件（用例名就是 Given / When / Then） | 91 |
+| `desktop.spec.ts`、`desktop-cold.spec.ts` | 「本机免登录」关着时 Desktop 不被拦（含运行中关开关）、插件签发的 cookie 不认、管理接口要登录、密钥还没读到时 | 23 |
 | `review-fixes.spec.ts`、`review.spec.ts` | 代码复核发现的问题的回归测试（CSRF、路径归一绕过、并发登录、长连接空挂、记录被刷掉等） | 21 |
 
-合计 **171 个用例**，不连外网（版本源、更新命令都用本地假的）。
+合计 **192 个用例**，不连外网（版本源、更新命令都用本地假的）。
 
 只跑单个文件：
 
