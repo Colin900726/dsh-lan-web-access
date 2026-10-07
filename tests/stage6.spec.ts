@@ -3,11 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
-  resolveUpdateCommand,
-  manualUpdateCommand,
-  pruneReleaseAgeExclusions,
-} from '../src/updater.ts';
+import { resolveUpdateCommand, manualUpdateCommand, allowLatestInstall } from '../src/updater.ts';
 import { dshHome } from '../src/settings-store.ts';
 import { resolveComputerName } from '../src/machine-name.ts';
 
@@ -139,29 +135,43 @@ describe('R-022 / R-009 访问地址挑哪块网卡', () => {
   });
 });
 
-describe('R-007 删了重装不掉回旧版：清掉 pnpm 冷静期放行名单里的旧条目', () => {
-  const yaml = (entries: string[]) =>
-    `packages:\n  - .\n\nnodeLinker: hoisted\nminimumReleaseAgeExclude:\n${entries.map((e) => `  - ${e}\n`).join('')}`;
-  it('Given 名单是「0.1.4、0.1.5、别的包」，When 当前是 0.1.6 且名单里已有 0.1.6，Then 只留本插件 0.1.6 和别的包', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'dsh-prune-'));
-    const file = pathToFileURL(join(dir, 'pnpm-workspace.yaml'));
-    writeFileSync(
-      file,
-      yaml([
-        'dsh-lan-web-access@0.1.4',
-        'other-plugin@1.0.0',
-        "'dsh-lan-web-access@0.1.5'",
-        'dsh-lan-web-access@0.1.6',
-      ]),
+describe('R-007 只填包名安装总是装最新版：pnpm 冷静期放行名单里本插件只留不带版本号的一条', () => {
+  const head = 'packages:\n  - .\n\nnodeLinker: hoisted\n';
+  const list = (entries: string[]) =>
+    `minimumReleaseAgeExclude:\n${entries.map((e) => `  - ${e}\n`).join('')}`;
+  const tmp = (content?: string) => {
+    const file = pathToFileURL(
+      join(mkdtempSync(join(tmpdir(), 'dsh-allow-')), 'pnpm-workspace.yaml'),
     );
-    expect(pruneReleaseAgeExclusions('0.1.6', file)).toBe(true);
+    if (content !== undefined) writeFileSync(file, content);
+    return file;
+  };
+  it('Given 名单是「0.1.4、别的包、0.1.5、0.1.6」，Then 本插件只剩一条不带版本号的，别的包不动；再调一次不改', () => {
+    const file = tmp(
+      head +
+        list([
+          'dsh-lan-web-access@0.1.4',
+          'other-plugin@1.0.0',
+          "'dsh-lan-web-access@0.1.5'",
+          'dsh-lan-web-access@0.1.6',
+        ]),
+    );
+    expect(allowLatestInstall(file)).toBe(true);
     expect(readFileSync(file, 'utf8')).toBe(
-      yaml(['other-plugin@1.0.0', 'dsh-lan-web-access@0.1.6']),
+      head + list(['dsh-lan-web-access', 'other-plugin@1.0.0']),
     );
-    expect(pruneReleaseAgeExclusions('0.1.6', file)).toBe(false);
+    expect(allowLatestInstall(file)).toBe(false);
   });
-  it('Given 设置文件不存在，Then 不报错、什么都不改', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'dsh-prune-'));
-    expect(pruneReleaseAgeExclusions('0.1.6', pathToFileURL(join(dir, 'none.yaml')))).toBe(false);
+  it('Given 还没有名单，Then 加上只有一条不带版本号的名单', () => {
+    const file = tmp(head);
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(head + list(['dsh-lan-web-access']));
+  });
+  it('Given 名单是单行写法，Then 不动', () => {
+    const file = tmp(head + 'minimumReleaseAgeExclude: [dsh-lan-web-access@0.1.4]\n');
+    expect(allowLatestInstall(file)).toBe(false);
+  });
+  it('Given 设置文件不存在，Then 不报错、不新建', () => {
+    expect(allowLatestInstall(tmp())).toBe(false);
   });
 });

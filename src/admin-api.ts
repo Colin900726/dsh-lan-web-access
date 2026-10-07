@@ -33,7 +33,7 @@ import { readDshVersion } from './selfcheck.ts';
 import {
   checkLatestVersion,
   manualUpdateCommand,
-  pruneReleaseAgeExclusions,
+  allowLatestInstall,
   runUpdate,
 } from './updater.ts';
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver';
@@ -690,8 +690,8 @@ export function registerAdminApi(rt: Runtime): () => void {
         const target = rt.update.latest;
         rt.update = { state: 'running', current: rt.version, latest: target };
         const result = await runUpdate(rt.profile, target);
-        // 名单里只留新版本，删了重装也不会掉回旧版（见 pruneReleaseAgeExclusions）。
-        if (result.ok) pruneReleaseAgeExclusions(target);
+        // pnpm 刚给新版本加了一条带版本号的放行条目：换回不带版本号的（见 allowLatestInstall）。
+        if (result.ok) allowLatestInstall();
         rt.update = result.ok
           ? { state: 'done', current: rt.version, latest: target }
           : {

@@ -63,13 +63,17 @@ export declare function runUpdate(profile: string, version: string, options?: {
     sources?: readonly UpdateSource[];
 }): Promise<UpdateResult>;
 /**
- * 清掉 pnpm「新版本冷静期放行名单」（`minimumReleaseAgeExclude`）里本插件的旧版本条目，只留 `keep`。
+ * 让「只填包名安装」总是装最新版：把 pnpm「新版本冷静期放行名单」（profile 的 pnpm-workspace.yaml 里的
+ * `minimumReleaseAgeExclude`）中本插件的条目换成一条不带版本号的 `dsh-lan-web-access`。
  *
- * dsh 内置的 pnpm 11.7 只认名单里本包的第一条：名单是「0.1.4、0.1.5」时，删掉插件再只填包名重装，
- * 装上的是 0.1.4 —— 删了重装也回不到新版本（2026-10-07 Mac / Windows 真机踩到，逐项对比确认）。
- * 每装一个确切版本 pnpm 就往名单末尾加一条，旧条目越积越多。只改本插件的条目，别的不动；
- * 文件不存在、读写失败都当没事（返回 false）。
+ * 用户 2026-10-07：「用户更新或安装，默认应该都是安装最新的，除非用户有需求，指定版本号」。
+ * dsh 内置的 pnpm 11.7 默认不装发布不到一天的版本，每装一个确切新版本就往名单末尾加一条带版本号的，
+ * 而名单里本包有多条时只认第一条：名单是「0.1.4、0.1.5」时删掉插件再只填包名重装，装上的是 0.1.4
+ * （2026-10-07 Mac / Windows 真机踩到，逐项对比确认）。换成不带版本号的一条后，只填包名装的就是最新版。
+ * 代价：对本插件不再有「新版本先等一天」的保护 —— 一键更新本来就装最新版，这层保护对本插件不起作用。
+ * 只改本插件的条目，别的包不动；名单是单行写法（`[a, b]`）时不动；文件不存在、读写失败都当没事。
+ * 插件启动时、一键更新成功后各调用一次。
  * @returns 有没有改动文件
  */
-export declare function pruneReleaseAgeExclusions(keep: string, file?: URL): boolean;
+export declare function allowLatestInstall(file?: URL): boolean;
 export {};

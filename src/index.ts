@@ -9,7 +9,7 @@
  * 局域网入口关闭；点「重新检查」或下次启动检查全过就自动恢复。
  */
 
-import { pruneReleaseAgeExclusions } from './updater.ts';
+import { allowLatestInstall } from './updater.ts';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
@@ -107,9 +107,8 @@ export function apply(ctx: Context, _config: Config): void {
 
   const profile = detectProfile(ctx);
   const version = ownVersion();
-  // pnpm 冷静期放行名单里本插件的旧条目会让「删了重装」装回旧版：启动时只留当前版本。
-  if (pruneReleaseAgeExclusions(version))
-    ctx.logger.info('remote-access: pruned stale release-age exclusions');
+  // 只填包名安装总是装最新版：pnpm 冷静期放行名单里本插件只留一条不带版本号的（见 allowLatestInstall）。
+  if (allowLatestInstall()) ctx.logger.info('remote-access: release-age exclusion set to latest');
   const logger: LoggerLike = {
     info: (m, ...a) => ctx.logger.info(m, ...a),
     warn: (m, ...a) => ctx.logger.warn(m, ...a),
