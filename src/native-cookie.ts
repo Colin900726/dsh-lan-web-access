@@ -11,14 +11,14 @@ import { NATIVE_COOKIE_MAX_AGE_SEC } from './shared.ts';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { rawService } from './cordis-raw.ts';
-import { credentialKey } from '@deepseek-ai/dsh-credentials';
 
 export const NATIVE_COOKIE_PREFIX = 'dsh-auth-';
 export const NATIVE_COOKIE_VERSION = 1;
 export const SIGNING_SECRET_BYTES = 32;
 export { NATIVE_COOKIE_MAX_AGE_SEC };
 /** 签名密钥所在的 credentials 记录。 */
-export const SIGNING_SECRET_RECORD = credentialKey('client-connection', 'browser-session');
+// dsh 的 credentialKey('client-connection', 'browser-session') 在运行时就是这个字符串；直接写，免得为它装一个包。
+export const SIGNING_SECRET_RECORD = 'client-connection/browser-session';
 
 /** 用到的 credentials 接口（只声明需要的部分）。 */
 export interface CredentialsLike {

@@ -199,12 +199,14 @@ export declare const zh: {
             readonly running: "通常不到 1 分钟；网络不好时会自动换下载来源，最长几分钟，别关 dsh";
             readonly done: (v: string) => string;
             readonly failed: {
-                readonly network: "连不上更新服务器。检查网络后重试，设置不受影响";
-                readonly 'no-command': (cmd: string) => string;
-                readonly failed: "更新没成功，设置不受影响。可以重试";
+                readonly network: "连不上更新服务器，检查网络后点「重试」，设置不受影响。";
+                readonly 'no-command': "找不到 dsh 命令，没能自动更新，设置不受影响。";
+                readonly 'bad-arg': "这个 dsh 配置的名字里有特殊字符，没法自动更新，设置不受影响。";
+                readonly failed: "更新没成功，可以点「重试」，设置不受影响。";
             };
-            /** 失败时附在原因后面的手动命令。 */
+            /** 失败时附在原因后面的手动办法：Web 给终端命令，Desktop 指引去「插件」页。 */
             readonly manual: (cmd: string) => string;
+            readonly manualDesktop: (v: string) => string;
             readonly check: "检查更新";
             readonly to: (v: string) => string;
             readonly busy: "更新中…";

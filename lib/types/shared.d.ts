@@ -124,7 +124,7 @@ export interface UpdateState {
     state: 'idle' | 'checking' | 'latest' | 'available' | 'unavailable' | 'running' | 'done' | 'failed';
     current: string;
     latest?: string;
-    reason?: 'network' | 'no-command' | 'failed';
+    reason?: 'network' | 'no-command' | 'bad-arg' | 'failed';
     /** 更新命令找不到时，给用户在终端手动运行的命令。 */
     command?: string;
 }

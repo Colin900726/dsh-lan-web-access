@@ -30,7 +30,7 @@ export declare const UPDATE_SOURCES: readonly UpdateSource[];
 export declare function resolveUpdateCommand(profile: string, version: string, platform?: NodeJS.Platform, resourcesPath?: string | undefined, source?: UpdateSource): UpdateCommand | undefined;
 export interface UpdateResult {
     ok: boolean;
-    reason?: 'network' | 'no-command' | 'failed';
+    reason?: 'network' | 'no-command' | 'bad-arg' | 'failed';
     output: string;
 }
 /** 磁盘上本插件的版本号，更新后核对用。 */

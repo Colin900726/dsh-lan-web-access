@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-web-access",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "DeepSeek Harness（dsh）局域网 Web 访问插件：局域网 / 异地组网里多台设备同时访问同一台 dsh；允许列表 + 管理密码，本机与 SSH 隧道免 token，Desktop 与 Web 通用。",
   "type": "module",
   "main": "lib/index.js",
@@ -35,7 +35,6 @@
     "prepack": "npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-credentials": "^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "peerDependencies": {

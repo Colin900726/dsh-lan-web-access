@@ -13,7 +13,7 @@ export declare const NATIVE_COOKIE_VERSION = 1;
 export declare const SIGNING_SECRET_BYTES = 32;
 export { NATIVE_COOKIE_MAX_AGE_SEC };
 /** 签名密钥所在的 credentials 记录。 */
-export declare const SIGNING_SECRET_RECORD: import("@deepseek-ai/dsh-credentials").CredentialKey;
+export declare const SIGNING_SECRET_RECORD = "client-connection/browser-session";
 /** 用到的 credentials 接口（只声明需要的部分）。 */
 export interface CredentialsLike {
     readRecord(key: unknown): Promise<unknown>;
