@@ -16,6 +16,11 @@ export interface GuardDeps {
     getSettings: () => Settings;
     sessions: SessionManager;
     getCredentials: () => CredentialsLike | undefined;
+    /**
+     * 请 dsh 自己验证请求里的登录 cookie：true 通过、false 不通过、undefined 问不了。
+     * 插件读不到签名密钥时（dsh 升级改了格式）用它，dsh 自己照样认得出。
+     */
+    dshAuthenticates?: (req: IncomingMessage) => boolean | undefined;
     logger: LoggerLike;
     isPublicRoute: (path: string) => boolean;
     /** 运行检查没通过：和关掉总开关一样，交回 dsh 官方认证。 */
@@ -36,10 +41,12 @@ export declare function isAuthorized(req: IncomingMessage, deps: GuardDeps): boo
 export declare function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
 /**
  * 本机的管理操作（改设置、改密码等）是否放行。调用前已确认是本机请求。
- * - 插件在接管、本机免登录开着：放行；
- * - 本机免登录关着：要有有效登录，或 dsh 自己签发的 cookie（Desktop 窗口）；
- * - 插件没在接管（总开关关了、安全退出）：按 dsh 官方认证来，要有效登录或签名有效的 dsh cookie，
- *   免得本机任意程序不带 token 就能把插件重新打开。
+ * 平时和安全退出时一样（用户 2026-10-07 定）：
+ * - 本机免登录开着：放行；
+ * - 本机免登录关着：要有效登录（本机浏览器输密码），或 dsh 自己签发的 cookie（Desktop 窗口）。
+ * 总开关被关掉时（回到 dsh 官方方式）：要有效登录或签名有效的 dsh cookie，
+ * 免得本机任意程序不带 token 就能把插件重新打开。
+ * 插件读不到签名密钥时，cookie 交给 dsh 自己验（见 validNativeCookie）。
  */
 export declare function adminAllowed(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
 /** 安装守卫，返回撤销函数（插件停用时把改过的东西全部还原）。 */

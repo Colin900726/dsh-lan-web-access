@@ -24,7 +24,6 @@ export declare function authorityOf(headers: IncomingMessage['headers']): string
 export declare function nativeCookieName(authority: string): string;
 /** 从 Cookie 头里取出这条 cookie 的值。 */
 export declare function readNativeCookie(headers: IncomingMessage['headers'], authority: string): string | undefined;
-/** 读取 dsh 的签名密钥，只读不建；读不到返回 undefined。 */
 export declare function loadSigningSecret(credentials: CredentialsLike | undefined): Promise<Buffer | undefined>;
 /** 同步取已读到的密钥；还没读到就顺手开始读，这次返回 undefined（按不认处理）。 */
 export declare function peekSigningSecret(credentials: CredentialsLike | undefined): Buffer | undefined;

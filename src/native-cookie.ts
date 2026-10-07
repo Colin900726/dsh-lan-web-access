@@ -71,10 +71,17 @@ let latestSecret: Buffer | undefined;
 const SECRET_CACHE_MS = 60_000;
 
 /** 读取 dsh 的签名密钥，只读不建；读不到返回 undefined。 */
+/** 测试用：DSH_REMOTE_ACCESS_FAKE_FAIL 含 signing 时当作读不到密钥（模拟 dsh 升级后格式变了）。 */
+function fakeNoSecret(): boolean {
+  return (process.env.DSH_REMOTE_ACCESS_FAKE_FAIL ?? '')
+    .split(',')
+    .some((x) => x.trim() === 'signing');
+}
+
 export async function loadSigningSecret(
   credentials: CredentialsLike | undefined,
 ): Promise<Buffer | undefined> {
-  if (credentials === undefined) return undefined;
+  if (credentials === undefined || fakeNoSecret()) return undefined;
   const cached = secretCache.get(rawService(credentials));
   if (cached !== undefined && Date.now() - cached.at < SECRET_CACHE_MS) return cached.secret;
   try {
@@ -98,7 +105,7 @@ export async function loadSigningSecret(
 
 /** 同步取已读到的密钥；还没读到就顺手开始读，这次返回 undefined（按不认处理）。 */
 export function peekSigningSecret(credentials: CredentialsLike | undefined): Buffer | undefined {
-  if (credentials === undefined) return undefined;
+  if (credentials === undefined || fakeNoSecret()) return undefined;
   const secret = secretCache.get(rawService(credentials))?.secret ?? latestSecret;
   if (secret === undefined) void loadSigningSecret(credentials);
   return secret;

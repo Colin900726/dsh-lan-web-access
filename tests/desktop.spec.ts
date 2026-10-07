@@ -1,6 +1,6 @@
 // 「本机免登录」关着时 Desktop 自己被拦（2026-10-07 真机发现）：Desktop 启动时用 dsh 的 token 换 cookie，
 // 窗口和 API 都凭这张 dsh 签发的 cookie。修复后的规则逐条一个测试。
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver';
 import { adminAllowed, installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
@@ -293,5 +293,54 @@ describe('插件签发记录满了：被挤掉的那些不能变成「dsh 签发
     expect(isAuthorized(req({ cookie: fresh.header }), deps)).toBe(false);
     // dsh 之后签发的照常认
     expect(isAuthorized(req({ cookie: cookieAt(Date.now() - 1000).header }), deps)).toBe(true);
+  });
+});
+
+describe('安全退出且插件读不到签名密钥时（dsh 升级改了格式），按用户 2026-10-07 定的表放行', () => {
+  // 插件读不到密钥（测试开关模拟），cookie 交给 dsh 自己验：dshOk 决定 dsh 认不认。
+  let dshOk: boolean | undefined;
+  const special = () => ({ ...deps, suspended: () => true, dshAuthenticates: () => dshOk });
+  beforeEach(() => {
+    process.env.DSH_REMOTE_ACCESS_FAKE_FAIL = 'signing';
+    dshOk = true;
+  });
+  afterEach(() => {
+    delete process.env.DSH_REMOTE_ACCESS_FAKE_FAIL;
+  });
+
+  it('Given 本机免登录开着，Then ②本机浏览器、③其他程序都放行（和平时一样）', async () => {
+    settings.allowLoopback = true;
+    dshOk = false;
+    expect(await adminAllowed(req({}), special())).toBe(true);
+  });
+  it('Given 本机免登录关着，When ① Desktop 窗口（dsh 签发的 cookie，dsh 认），Then 放行', async () => {
+    expect(await adminAllowed(req({ cookie: cookieAt(Date.now()).header }), special())).toBe(true);
+  });
+  it('Given 本机免登录关着，When ②本机浏览器用密码登录过，Then 放行', async () => {
+    const token = deps.sessions.create('admin', '127.0.0.1', 'UA');
+    expect(await adminAllowed(req({ cookie: `dsh_sid=${token}` }), special())).toBe(true);
+  });
+  it('Given 本机免登录关着，When ③其他程序（没有凭证、或伪造的 cookie dsh 不认），Then 拒绝', async () => {
+    expect(await adminAllowed(req({}), special())).toBe(false);
+    dshOk = false;
+    expect(await adminAllowed(req({ cookie: cookieAt(Date.now()).header }), special())).toBe(false);
+  });
+  it('Given 本机免登录关着，When 拿着插件自己签发过的 cookie（dsh 也认签名），Then 拒绝', async () => {
+    const c = cookieAt(Date.now());
+    settings.pluginMintedCookies.push({
+      h: nativeCookieFingerprint(c.value),
+      exp: Date.now() + 1e9,
+    });
+    expect(await adminAllowed(req({ cookie: c.header }), special())).toBe(false);
+  });
+  it('Given 问不了 dsh（拿不到 connection 服务），Then 只有密码登录过的能操作', async () => {
+    dshOk = undefined;
+    expect(await adminAllowed(req({ cookie: cookieAt(Date.now()).header }), special())).toBe(false);
+  });
+  it('Given 总开关被手动关掉（回到 dsh 官方方式）、本机免登录开着，Then 没凭证的本机程序不能操作，Desktop 窗口可以', async () => {
+    settings.allowLoopback = true;
+    settings.enabled = false;
+    expect(await adminAllowed(req({}), special())).toBe(false);
+    expect(await adminAllowed(req({ cookie: cookieAt(Date.now()).header }), special())).toBe(true);
   });
 });

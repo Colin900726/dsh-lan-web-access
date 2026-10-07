@@ -173,9 +173,8 @@ describe('R-008 / R-015 运行检查与安全退出', () => {
     await vi.waitFor(async () => expect((await p.status()).fault).toBe(true));
     delete process.env.DSH_REMOTE_ACCESS_FAKE_FAIL;
     const selfcheck = p.routes.get('/api/remote-access/selfcheck')!;
-    // 不带任何凭证的本机程序点不了「重新检查」；带 dsh cookie（设置页所在的浏览器）可以。
-    expect((await call(selfcheck, 'POST', {})).status).toBe(401);
-    const res = await call(selfcheck, 'POST', {}, undefined, dshCookie());
+    // 安全退出时和平时一样：本机免登录开着（默认），本机直接能点「重新检查」。
+    const res = await call(selfcheck, 'POST', {});
     expect(res.body.fault).toBe(false);
     const st = await p.status();
     expect((st.lan as { listening: boolean }).listening).toBe(true);

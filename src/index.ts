@@ -102,6 +102,17 @@ export function apply(ctx: Context, _config: Config): void {
       return undefined;
     }
   };
+  // 请 dsh 自己验证登录 cookie（dsh 的 connection 服务）：插件读不到签名密钥时用。
+  const dshAuthenticates = (req: IncomingMessage): boolean | undefined => {
+    try {
+      const connection = (ctx as unknown as { get(key: string): unknown }).get('connection') as
+        { requestRejection?: (r: IncomingMessage) => number | undefined } | undefined;
+      if (typeof connection?.requestRejection !== 'function') return undefined;
+      return connection.requestRejection(req) === undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   const profile = detectProfile(ctx);
   const version = ownVersion();
@@ -155,6 +166,7 @@ export function apply(ctx: Context, _config: Config): void {
     getSettings: () => settingsStore.get(),
     sessions,
     getCredentials,
+    dshAuthenticates,
     logger,
     isPublicRoute,
     suspended: () => rt.fault(),
