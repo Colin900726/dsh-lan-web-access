@@ -211,11 +211,14 @@ export const zh = {
       done: (v: string) => `已更新到 ${v}，重启 dsh 后生效`,
       failed: {
         network: '连不上更新服务器。检查网络后重试，设置不受影响',
-        'no-command': (cmd: string) => `找不到 dsh 命令，设置不受影响。可以在终端运行：${cmd}`,
+        'no-command': '找不到 dsh 命令，没能自动更新，设置不受影响。',
+        'bad-arg': '这个 dsh 配置的名字里有特殊字符，没法自动更新，设置不受影响。',
         failed: '更新没成功，设置不受影响。可以重试',
       },
-      /** 失败时附在原因后面的手动命令。 */
-      manual: (cmd: string) => `也可以在终端运行：${cmd}`,
+      /** 失败时附在原因后面的手动办法：Web 给终端命令，Desktop 指引去「插件」页。 */
+      manual: (cmd: string) => `可以在终端运行：${cmd}`,
+      manualDesktop: (v: string) =>
+        `也可以到 dsh 的「插件」页面更新，或在「添加插件」里填 dsh-lan-web-access@${v}`,
       check: '检查更新',
       to: (v: string) => `更新到 ${v}`,
       busy: '更新中…',

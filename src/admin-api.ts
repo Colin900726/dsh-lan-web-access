@@ -685,8 +685,10 @@ export function registerAdminApi(rt: Runtime): () => void {
               current: rt.version,
               latest: target,
               reason: result.reason ?? 'failed',
-              // 不管哪种失败都给手动命令，用户可以自己在终端试。
-              command: manualUpdateCommand(rt.profile, target),
+              // 手动命令只给 Web：Desktop 用户的电脑上一般没有 dsh 命令，界面改为指引去「插件」页。
+              ...(rt.profile === 'desktop'
+                ? {}
+                : { command: manualUpdateCommand(rt.profile, target) }),
             };
         rt.log.record(
           'update',

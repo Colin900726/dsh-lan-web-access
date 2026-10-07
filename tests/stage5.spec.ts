@@ -83,8 +83,8 @@ async function freePort(): Promise<number> {
   });
 }
 
-/** 在假 dsh 上装插件，返回路由、connection/request 闸门和卸载函数。 */
-function boot() {
+/** 在假 dsh 上装插件，返回路由、connection/request 闸门和卸载函数。profile：desktop / web。 */
+function boot(profile?: string) {
   const routes = new Map<string, WebRoute>();
   const webServer = {
     port: 3080,
@@ -104,7 +104,12 @@ function boot() {
   const ctx = {
     webServer,
     logger: { info() {}, warn() {} },
-    get: (key: string) => (key === 'credentials' ? credentials : undefined),
+    get: (key: string) =>
+      key === 'credentials'
+        ? credentials
+        : key === 'profileContext' && profile !== undefined
+          ? { name: profile }
+          : undefined,
     effect: (fn: () => unknown) => {
       const d = fn();
       if (typeof d === 'function') disposers.push(d as () => unknown);
@@ -361,6 +366,26 @@ describe('R-007 一键更新', () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
     expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: true });
   });
+  it('Given 版本号里有命令行特殊字符，Then 回报 bad-arg，不去跑命令', async () => {
+    delete process.env.DSH_REMOTE_ACCESS_UPDATE_CMD;
+    expect(await runUpdate('web', '9.9.9 && calc')).toMatchObject({ ok: false, reason: 'bad-arg' });
+  });
+  for (const [profile, hasCommand] of [
+    ['web', true],
+    ['desktop', false],
+  ] as const) {
+    it(`Given ${profile} 上更新失败，Then ${hasCommand ? '给终端手动命令' : '不给终端命令（界面指引去「插件」页）'}`, async () => {
+      answer = { status: 200, body: { version: '9.9.9' } };
+      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'echo boom; exit 1';
+      const p = boot(profile);
+      const route = p.routes.get('/api/remote-access/update')!;
+      await call(route);
+      const failed = (await call(route, 'POST', {})).body;
+      expect(failed.state).toBe('failed');
+      expect('command' in failed).toBe(hasCommand);
+      await p.dispose();
+    });
+  }
   it('Given 找不到更新命令，Then 回报 no-command（界面给手动命令）', async () => {
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 127';
     expect(await runUpdate('web', '9.9.9')).toMatchObject({ ok: false, reason: 'no-command' });

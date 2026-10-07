@@ -129,7 +129,7 @@ export function resolveUpdateCommand(
 
 export interface UpdateResult {
   ok: boolean;
-  reason?: 'network' | 'no-command' | 'failed';
+  reason?: 'network' | 'no-command' | 'bad-arg' | 'failed';
   output: string;
 }
 
@@ -242,7 +242,7 @@ export async function runUpdate(
     if (command === undefined)
       return {
         ok: false,
-        reason: 'no-command',
+        reason: 'bad-arg',
         output: `profile 名或版本号不能拼进命令行：${profile} ${version}`,
       };
     const r = await runOnce(command, timeoutMs);

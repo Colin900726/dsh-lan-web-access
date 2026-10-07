@@ -160,12 +160,10 @@ function UpdateRow({
     case 'failed':
       desc = (
         <>
-          {update.reason === 'no-command'
-            ? u.failed['no-command'](update.command ?? '')
-            : u.failed[update.reason ?? 'failed']}
-          {update.reason !== 'no-command' && update.command !== undefined
-            ? ` ${u.manual(update.command)}`
-            : null}
+          {u.failed[update.reason ?? 'failed']}{' '}
+          {update.command !== undefined
+            ? u.manual(update.command)
+            : u.manualDesktop(update.latest ?? '')}
         </>
       );
       action = (
