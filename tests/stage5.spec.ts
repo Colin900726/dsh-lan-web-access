@@ -311,7 +311,7 @@ describe('R-007 一键更新', () => {
     expect(r).toMatchObject({ ok: true });
   });
   it('Given npm 官方源和国内镜像都连不上、GitHub 能装上，Then 用 GitHub 装上，回报成功（来源不锁死一种）', async () => {
-    const counter = join(mkdtempSync(join(tmpdir(), 'dsh-upd-')), 'n');
+    const counter = join(dir, 'n');
     // 第 1、2 次（npm、镜像）断网，第 3 次（GitHub）成功
     process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = `n=$(cat '${counter}' 2>/dev/null || echo 0); echo $((n+1)) > '${counter}'; if [ "$n" -ge 2 ]; then exit 0; else echo ECONNRESET; exit 1; fi`;
     const r = await runUpdate('web', '9.9.9', {
@@ -349,5 +349,89 @@ describe('R-007 一键更新', () => {
     }[];
     expect(logs.some((e) => e.kind === 'update')).toBe(true);
     await p.dispose();
+  });
+  for (const [cmd, reason] of [
+    ['exit 127', 'no-command'],
+    ['echo getaddrinfo ENOTFOUND registry.npmjs.org; exit 1', 'network'],
+    ['echo boom; exit 1', 'failed'],
+  ] as const) {
+    it(`Given 更新失败（${reason}），Then 状态「失败」带原因和手动命令、记一笔、设置不变，再点能重试`, async () => {
+      answer = { status: 200, body: { version: '9.9.9' } };
+      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = cmd;
+      new SettingsStore().update({ sessionMaxAgeDays: 7 });
+      const p = boot();
+      const route = p.routes.get('/api/remote-access/update')!;
+      await call(route);
+      const failed = (await call(route, 'POST', {})).body;
+      expect(failed).toMatchObject({ state: 'failed', reason, latest: '9.9.9' });
+      expect(String(failed.command)).toContain('dsh-lan-web-access@9.9.9');
+      const logs = (await call(p.routes.get('/api/remote-access/logs')!)).body.logs as {
+        kind: string;
+        detail: string;
+      }[];
+      expect(logs.some((e) => e.kind === 'update' && e.detail.startsWith('更新失败'))).toBe(true);
+      expect(new SettingsStore().get().sessionMaxAgeDays).toBe(7);
+      // 重试：这次成功
+      process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
+      expect((await call(route, 'POST', {})).body).toMatchObject({ state: 'done' });
+      await p.dispose();
+    });
+  }
+
+  it('Given 已是最新，When 直接调更新接口，Then 不更新', async () => {
+    answer = { status: 200, body: { version: '0.0.1' } };
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
+    const p = boot();
+    const route = p.routes.get('/api/remote-access/update')!;
+    expect((await call(route)).body.state).toBe('latest');
+    expect((await call(route, 'POST', {})).body.state).toBe('latest');
+    await p.dispose();
+  });
+});
+
+describe('R-007 版本从哪查、装不上换哪个来源（不锁死一种来源）', () => {
+  const servers: Server[] = [];
+  const serve = async (status: number, body: unknown): Promise<string> => {
+    const s = createServer((_q, r) => {
+      r.writeHead(status, { 'content-type': 'application/json' });
+      r.end(JSON.stringify(body));
+    });
+    servers.push(s);
+    await new Promise<void>((r) => s.listen(0, '127.0.0.1', () => r()));
+    return `http://127.0.0.1:${(s.address() as { port: number }).port}/`;
+  };
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((s) => new Promise((r) => s.close(r))));
+  });
+
+  it('Given 两个版本源版本不同（镜像落后），Then 取较高的', async () => {
+    process.env.DSH_REMOTE_ACCESS_REGISTRY = `${await serve(200, { version: '0.1.6' })},${await serve(200, { version: '0.1.7' })}`;
+    expect(await checkLatestVersion('0.1.5')).toMatchObject({
+      state: 'available',
+      latest: '0.1.7',
+    });
+  });
+  it('Given 一个版本源连不上、另一个有版本，Then 用查得到的那个', async () => {
+    process.env.DSH_REMOTE_ACCESS_REGISTRY = `${await serve(404, {})},${await serve(200, { version: '0.1.7' })}`;
+    expect(await checkLatestVersion('0.1.5')).toMatchObject({
+      state: 'available',
+      latest: '0.1.7',
+    });
+  });
+  it('Given 版本源返回的版本号不规范，Then 当作没查到', async () => {
+    process.env.DSH_REMOTE_ACCESS_REGISTRY = await serve(200, { version: '1.0.0 && calc' });
+    expect((await checkLatestVersion('0.1.5')).state).toBe('unavailable');
+  });
+  it('Given npm 官方源命令成功但装上的还是旧版，Then 换下一个来源，装对了就成功', async () => {
+    process.env.DSH_REMOTE_ACCESS_UPDATE_CMD = 'exit 0';
+    const seen = ['0.1.5', '0.1.7']; // 第一次核对是旧版，第二次是新版
+    const r = await runUpdate('web', '0.1.7', {
+      verify: true,
+      readInstalled: () => seen.shift(),
+      sources: UPDATE_SOURCES,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.output).toContain('装上的版本是 0.1.5');
+    expect(seen).toHaveLength(0);
   });
 });

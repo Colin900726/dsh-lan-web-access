@@ -10,8 +10,8 @@ export declare class SettingsStore {
     private load;
     private write;
     get(): Settings;
-    /** 合并写入并通知监听者。 */
-    update(patch: Partial<Settings>): Settings;
+    /** 合并写入并通知监听者（notify 为 false 时只写不通知，用于记录类数据）。 */
+    update(patch: Partial<Settings>, notify?: boolean): Settings;
     /** 注册变更监听，返回取消函数。 */
     onChange(fn: (s: Settings) => void): () => void;
 }

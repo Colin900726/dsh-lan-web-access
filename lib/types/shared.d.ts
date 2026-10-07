@@ -8,6 +8,8 @@ export type Edition = 'desktop' | 'web' | 'unknown';
 export declare const ERROR_CODES: {
     /** 需要先设管理密码（关本机免登录、开局域网）。 */
     readonly passwordRequired: "password-required";
+    /** 本机免登录关着、本机还没登录时做管理操作。 */
+    readonly loginRequired: "login-required";
     /** 只能在本机做的操作，从局域网发来的。 */
     readonly localOnly: "local-only";
     /** 请求体不是合法 JSON。 */
@@ -36,6 +38,14 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 export declare const GATEWAY_HEADER = "x-dsh-remote-gateway";
 /** 登录保持可选的天数。 */
 export declare const SESSION_MAX_AGE_CHOICES: readonly [1, 7, 14, 30];
+/** 登录保持天数的默认值。 */
+export declare const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
+/** 管理密码最少几位。 */
+export declare const MIN_PASSWORD_LENGTH = 12;
+/** 访问记录最多留几条。 */
+export declare const ACCESS_LOG_MAX = 200;
+/** 登录页「dsh 还没准备好」时每隔几秒自动重试。 */
+export declare const LOGIN_RETRY_SECONDS = 5;
 /** 支持的 dsh 版本范围（和 package.json 的 peerDependencies 一致）。 */
 export declare const COMPAT_MIN = "0.1.7-rc.1";
 export declare const COMPAT_BELOW = "0.3.0-0";

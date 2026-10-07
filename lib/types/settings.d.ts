@@ -3,7 +3,7 @@
  * 存在 `~/.dsh/remote-access.json`（仅本人可读），不放 dsh 的插件配置里：那里一改就会重新加载插件。
  */
 /** 设备白名单条目。 */
-import { SESSION_MAX_AGE_CHOICES } from './shared.ts';
+import { DEFAULT_SESSION_MAX_AGE_DAYS, MIN_PASSWORD_LENGTH, SESSION_MAX_AGE_CHOICES } from './shared.ts';
 export interface WhitelistEntry {
     /** 稳定 id（客户端生成）。 */
     id: string;
@@ -59,22 +59,22 @@ export interface Settings {
     sessionMaxAgeDays: number;
     /** 会话签名密钥（第一次启动生成）。 */
     sessionSecret: string | null;
-    /** 「本机免登录」关掉的时间；开着时为 null。关掉之前签发的 cookie 都不再认。 */
-    localLoginRequiredSince: number | null;
-    /** 「本机免登录」关着期间插件自己签发的 cookie 指纹（不当成 dsh 签发的）。 */
-    lockedMintedCookies: {
+    /** 开始记录插件签发 cookie 的时间。早于它签发的 dsh cookie 分不清是谁签的，不认。 */
+    mintTrackingSince: number | null;
+    /** 插件自己签发过的 cookie 指纹：「本机免登录」关着时不把它们当成 dsh 签发的。 */
+    pluginMintedCookies: {
         h: string;
         exp: number;
     }[];
 }
 export declare const DEFAULT_SETTINGS: Settings;
-export { SESSION_MAX_AGE_CHOICES };
-export declare const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
-export declare const MIN_PASSWORD_LENGTH = 12;
+export { SESSION_MAX_AGE_CHOICES, DEFAULT_SESSION_MAX_AGE_DAYS, MIN_PASSWORD_LENGTH };
 export declare function isValidSessionMaxAgeDays(value: unknown): value is number;
 /** 端口是否在 1–65535。 */
 export declare function isPortInRange(port: unknown): port is number;
-/** 局域网入口实际用的端口：没设过或和主端口冲突时，用主端口 + 1。 */
+/** 局域网入口的默认端口：dsh 主端口 + 1。 */
+export declare function defaultLanPort(mainPort: number): number;
+/** 局域网入口实际用的端口：没设过或和主端口冲突时，用默认端口。 */
 export declare function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, mainPort: number): number;
 /** 局域网端口是否可用：在范围内，且不等于 dsh 主端口。 */
 export declare function isValidPort(port: unknown, mainPort: number): boolean;

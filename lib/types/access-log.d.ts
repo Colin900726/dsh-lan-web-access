@@ -1,4 +1,4 @@
-/** 访问记录：内存里留最近 200 条。 */
+/** 访问记录：内存里留最近 ACCESS_LOG_MAX 条。 */
 import type { AccessLogEntry } from './settings.ts';
 export declare class AccessLog {
     private entries;

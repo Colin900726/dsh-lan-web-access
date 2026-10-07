@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -139,10 +139,14 @@ describe('R-007 只填包名安装总是装最新版：pnpm 冷静期放行名�
   const head = 'packages:\n  - .\n\nnodeLinker: hoisted\n';
   const list = (entries: string[]) =>
     `minimumReleaseAgeExclude:\n${entries.map((e) => `  - ${e}\n`).join('')}`;
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
   const tmp = (content?: string) => {
-    const file = pathToFileURL(
-      join(mkdtempSync(join(tmpdir(), 'dsh-allow-')), 'pnpm-workspace.yaml'),
-    );
+    const d = mkdtempSync(join(tmpdir(), 'dsh-allow-'));
+    dirs.push(d);
+    const file = pathToFileURL(join(d, 'pnpm-workspace.yaml'));
     if (content !== undefined) writeFileSync(file, content);
     return file;
   };
@@ -173,5 +177,40 @@ describe('R-007 只填包名安装总是装最新版：pnpm 冷静期放行名�
   });
   it('Given 设置文件不存在，Then 不报错、不新建', () => {
     expect(allowLatestInstall(tmp())).toBe(false);
+  });
+  it('Given Windows 换行（CRLF）的文件，Then 照样只改一处、换行方式不变，不会多出第二个同名键', () => {
+    const file = tmp(
+      'packages:\r\n  - .\r\nminimumReleaseAgeExclude:\r\n  - dsh-lan-web-access@0.1.4\r\nnodeLinker: hoisted\r\n',
+    );
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      'packages:\r\n  - .\r\nminimumReleaseAgeExclude:\r\n  - dsh-lan-web-access\r\nnodeLinker: hoisted\r\n',
+    );
+  });
+  it('Given 别的列表里也有本插件（如 onlyBuiltDependencies），Then 只动 minimumReleaseAgeExclude', () => {
+    const before =
+      'onlyBuiltDependencies:\n  - dsh-lan-web-access\nminimumReleaseAgeExclude:\n  - dsh-lan-web-access@0.1.4\n';
+    const file = tmp(before);
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      'onlyBuiltDependencies:\n  - dsh-lan-web-access\nminimumReleaseAgeExclude:\n  - dsh-lan-web-access\n',
+    );
+  });
+  it('Given 列表用 4 格缩进、开头是注释，Then 新条目照已有条目的缩进', () => {
+    const file = tmp('minimumReleaseAgeExclude:\n    # 手写的说明\n    - foo@1.0.0\n');
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      'minimumReleaseAgeExclude:\n    - dsh-lan-web-access\n    # 手写的说明\n    - foo@1.0.0\n',
+    );
+  });
+  it('Given 列表条目顶格写（`- x` 不缩进），Then 新条目也顶格', () => {
+    const file = tmp('minimumReleaseAgeExclude:\n- dsh-lan-web-access@0.1.5\n- foo@1.0.0\n');
+    expect(allowLatestInstall(file)).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(
+      'minimumReleaseAgeExclude:\n- dsh-lan-web-access\n- foo@1.0.0\n',
+    );
+  });
+  it('Given 从源码目录运行（不在 dsh profile 的 node_modules 里），Then 不去找、不改任何文件', () => {
+    expect(allowLatestInstall()).toBe(false);
   });
 });

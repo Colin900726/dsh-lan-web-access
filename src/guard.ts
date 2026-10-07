@@ -44,7 +44,7 @@ export interface GuardDeps {
   /** 局域网入口转发时带的令牌（每次启动随机生成）。 */
   gatewayToken?: string;
   /** 记下插件自己签发的 cookie，以后不把它当成 dsh 签发的。 */
-  recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
+  recordPluginMint?: (fingerprint: string, expiresAt: number) => void;
 }
 
 /** 用 dsh 官方 token 换登录 cookie（`GET /?token=…`，Desktop 每次启动都这样）。交给 dsh 自己校验。 */
@@ -59,7 +59,10 @@ function isOfficialTokenExchange(req: IncomingMessage): boolean {
   return (url.pathname === '/' || url.pathname === '/index.html') && url.searchParams.has('token');
 }
 
-/** 带着 dsh 自己签发的有效 cookie（Desktop 窗口用的就是这种），且签发于「本机免登录」关掉之后。 */
+/**
+ * 带着 dsh 自己签发的有效 cookie（Desktop 窗口用的就是这种）。
+ * 插件签发的 cookie 用的是同一把密钥，靠记下的指纹区分；开始记录之前签发的分不清，不认。
+ */
 function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings): boolean {
   const authority = authorityOf(req.headers);
   if (authority === undefined) return false;
@@ -69,10 +72,9 @@ function hasDshIssuedCookie(req: IncomingMessage, deps: GuardDeps, s: Settings):
   if (secret === undefined) return false;
   const payload = verifyNativeCookie(value, secret, authority);
   if (payload === undefined) return false;
-  if (s.localLoginRequiredSince === null || payload.issuedAt < s.localLoginRequiredSince)
-    return false;
+  if (s.mintTrackingSince === null || payload.issuedAt < s.mintTrackingSince) return false;
   const fingerprint = nativeCookieFingerprint(value);
-  return !s.lockedMintedCookies.some((x) => x.h === fingerprint);
+  return !s.pluginMintedCookies.some((x) => x.h === fingerprint);
 }
 
 /** 是不是本插件的局域网入口转发来的（入口已经查过设备和登录）。 */
@@ -131,6 +133,23 @@ export async function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): 
   if (credentials === undefined || peekSigningSecret(credentials) !== undefined) return false;
   if ((await loadSigningSecret(credentials)) === undefined) return false;
   return isAuthorized(req, deps);
+}
+
+/**
+ * 本机的管理操作（改设置、改密码等）是否放行。本机免登录开着时都放行；关着时要有有效登录，
+ * 或是 dsh 自己签发的 cookie（Desktop 窗口）。调用前已确认是本机请求。
+ */
+export async function adminAllowed(req: IncomingMessage, deps: GuardDeps): Promise<boolean> {
+  const s = deps.getSettings();
+  if (s.allowLoopback) return true;
+  if (deps.sessions.validate(readSessionToken(req) ?? '') !== undefined) return true;
+  if (!isLoopbackHost(req.headers.host)) return false;
+  if (hasDshIssuedCookie(req, deps, s)) return true;
+  const authority = authorityOf(req.headers);
+  if (authority === undefined || readNativeCookie(req.headers, authority) === undefined)
+    return false;
+  if ((await loadSigningSecret(deps.getCredentials())) === undefined) return false;
+  return hasDshIssuedCookie(req, deps, deps.getSettings());
 }
 
 function replyJson(res: ServerResponse, status: number, data: Record<string, unknown>): void {
@@ -242,11 +261,10 @@ export function installGuard(deps: GuardDeps): () => void {
       const target = req.url ?? '/';
       const safe = target.startsWith('/') && !target.startsWith('//') ? target : '/';
       const cookie = issueNativeCookie(secret, authority);
-      if (!deps.getSettings().allowLoopback)
-        deps.recordLockedMint?.(
-          nativeCookieFingerprint(setCookieValue(cookie)),
-          Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
-        );
+      deps.recordPluginMint?.(
+        nativeCookieFingerprint(setCookieValue(cookie)),
+        Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
+      );
       if (isDocumentNavigation(req)) {
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',

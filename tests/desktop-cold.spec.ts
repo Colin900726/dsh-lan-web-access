@@ -24,7 +24,7 @@ const settings: Settings = {
   enabled: true,
   allowLoopback: false,
   passwordHash: 'salt:hash',
-  localLoginRequiredSince: Date.now() - 60_000,
+  mintTrackingSince: Date.now() - 60_000,
 };
 const deps: GuardDeps = {
   webServer: { port: 19387 } as unknown as WebServer,

@@ -23,8 +23,13 @@ export const MIRROR_REGISTRY = 'https://registry.npmmirror.com';
 export const GITHUB_REPO = 'Colin900726/dsh-lan-web-access';
 
 function versionUrls(): string[] {
+  // 测试用：可以给多个，逗号分隔。
   const fake = process.env.DSH_REMOTE_ACCESS_REGISTRY;
-  if (fake) return [fake];
+  if (fake)
+    return fake
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
   const path = `/${encodeURIComponent(PACKAGE_NAME)}/latest`;
   return [NPM_REGISTRY + path, MIRROR_REGISTRY + path];
 }
@@ -34,7 +39,9 @@ async function fetchVersion(url: string, signal: AbortSignal): Promise<string | 
     const res = await fetch(url, { signal });
     if (!res.ok) return undefined;
     const data = (await res.json()) as { version?: unknown };
-    return typeof data.version === 'string' ? data.version : undefined;
+    return typeof data.version === 'string' && SAFE_VERSION.test(data.version)
+      ? data.version
+      : undefined;
   } catch {
     return undefined;
   }
@@ -140,36 +147,65 @@ export function installedVersion(): string | undefined {
   }
 }
 
-/** 跑一次命令，返回退出码和输出。 */
-function runOnce(
-  command: UpdateCommand,
-  timeoutMs: number,
-): Promise<{ code: number | null | undefined; output: string; error?: NodeJS.ErrnoException }> {
+interface RunResult {
+  code: number | null | undefined;
+  output: string;
+  error?: NodeJS.ErrnoException;
+  timedOut?: boolean;
+}
+
+/** 杀掉整棵进程树：dsh 会再起 pnpm，只杀直接子进程的话 pnpm 还在写文件。 */
+function killTree(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/T', '/F', '/PID', String(pid)]);
+    else process.kill(-pid, 'SIGKILL');
+  } catch {
+    // 进程已经退出。
+  }
+}
+
+/** 跑一次命令，返回退出码和输出。超时就杀掉整棵进程树，等它真的退出了才返回。 */
+function runOnce(command: UpdateCommand, timeoutMs: number): Promise<RunResult> {
   return new Promise((resolve) => {
     const { cmd, args, env, shell } = command;
     let output = '';
     let settled = false;
-    const finish = (r: {
-      code: number | null | undefined;
-      output: string;
-      error?: NodeJS.ErrnoException;
-    }): void => {
+    let timedOut = false;
+    const finish = (r: RunResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(giveUp);
       resolve(r);
     };
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env, shell });
+    // 非 Windows 上单独成组，超时时能连子孙进程一起杀。
+    const child = spawn(cmd, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      shell,
+      detached: process.platform !== 'win32',
+    });
+    let giveUp: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
-      child.kill();
-      finish({ code: null, output: `${output}\n[timeout]` });
+      timedOut = true;
+      killTree(child.pid);
+      // 杀了还不退出的，最多再等 10 秒。
+      giveUp = setTimeout(
+        () => finish({ code: null, output: `${output}\n[timeout]`, timedOut }),
+        10_000,
+      );
     }, timeoutMs);
     child.stdout.on('data', (d: Buffer) => (output += d.toString()));
     child.stderr.on('data', (d: Buffer) => (output += d.toString()));
     child.on('error', (error: NodeJS.ErrnoException) =>
       finish({ code: undefined, output: error.message, error }),
     );
-    child.on('close', (code) => finish({ code, output }));
+    child.on('close', (code) =>
+      finish(
+        timedOut ? { code: null, output: `${output}\n[timeout]`, timedOut } : { code, output },
+      ),
+    );
   });
 }
 
@@ -221,46 +257,69 @@ export async function runUpdate(
       networkOnly = false;
       continue;
     }
-    if (!NETWORK_ERROR.test(r.output)) networkOnly = false;
+    // 超时多半是网络问题，和连不上一样算。
+    if (!r.timedOut && !NETWORK_ERROR.test(r.output)) networkOnly = false;
   }
   return { ok: false, reason: networkOnly ? 'network' : 'failed', output: log };
 }
 
-/** profile 里 pnpm 的设置文件（本插件装在 `<profile>/node_modules/dsh-lan-web-access/`）。 */
-function profileWorkspaceFile(): URL {
-  return new URL('../../../pnpm-workspace.yaml', import.meta.url);
+/**
+ * profile 里 pnpm 的设置文件。只有确认本插件装在 `<profile>/node_modules/dsh-lan-web-access/` 里、
+ * 且 profile 的 package.json 依赖了它时才返回；从源码目录运行（测试、本地链接安装）返回 undefined。
+ */
+function profileWorkspaceFile(): URL | undefined {
+  const nodeModules = new URL('../../', import.meta.url);
+  if (!/\/node_modules\/$/.test(nodeModules.pathname)) return undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', nodeModules), 'utf8')) as {
+      dependencies?: Record<string, unknown>;
+    };
+    if (pkg.dependencies?.[PACKAGE_NAME] === undefined) return undefined;
+  } catch {
+    return undefined;
+  }
+  return new URL('../pnpm-workspace.yaml', nodeModules);
 }
 
-const VERSIONED_ENTRY = /^\s*-\s*['"]?dsh-lan-web-access@[^'"\s]+['"]?\s*$/;
-const NAME_ENTRY = /^\s*-\s*['"]?dsh-lan-web-access['"]?\s*$/;
+const escaped = PACKAGE_NAME.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+/** 本插件的条目：带版本号的（pnpm 每装一个新版本加一条）或不带版本号的。 */
+const OWN_ENTRY = new RegExp(`^\\s*-\\s*['"]?${escaped}(@[^'"\\s]+)?['"]?\\s*$`);
 const LIST_KEY = /^minimumReleaseAgeExclude:[ \t]*$/;
+/** 列表下面的一行：空行、缩进的行、`-` 开头的条目、注释。遇到别的顶层键就结束。 */
+const IN_BLOCK = /^(\s|-|#|$)/;
 
 /**
  * 让「只填包名安装」总是装最新版。
  *
  * pnpm 默认不装发布不到一天的版本，每装一个新版本就往 `minimumReleaseAgeExclude` 名单加一条
  * `dsh-lan-web-access@x.y.z`；名单里本包有多条时它只认第一条，删了重装就会装回旧版。
- * 这里把本插件的条目换成一条不带版本号的，对所有版本放行。别的包的条目不动。
+ * 这里把名单里本插件的条目换成一条不带版本号的，对所有版本放行。别的条目、别的键都不动，
+ * 换行方式和缩进照原样；名单是单行写法（`[a, b]`）时不动。
  * @returns 有没有改动文件
  */
-export function allowLatestInstall(file: URL = profileWorkspaceFile()): boolean {
+export function allowLatestInstall(file: URL | undefined = profileWorkspaceFile()): boolean {
+  if (file === undefined) return false;
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch {
     return false;
   }
-  if (/^minimumReleaseAgeExclude:[ \t]*\S/m.test(text)) return false;
-  const lines = text.split('\n').filter((l) => !VERSIONED_ENTRY.test(l) && !NAME_ENTRY.test(l));
-  const at = lines.findIndex((l) => LIST_KEY.test(l));
-  if (at === -1) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split(/\r?\n/);
+  if (lines.some((l) => /^minimumReleaseAgeExclude:[ \t]*\S/.test(l))) return false;
+  const key = lines.findIndex((l) => LIST_KEY.test(l));
+  if (key === -1) {
     while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    lines.push('minimumReleaseAgeExclude:', '  - dsh-lan-web-access', '');
+    lines.push('minimumReleaseAgeExclude:', `  - ${PACKAGE_NAME}`, '');
   } else {
-    const indent = /^(\s*)-/.exec(lines[at + 1] ?? '')?.[1] ?? '  ';
-    lines.splice(at + 1, 0, `${indent}- dsh-lan-web-access`);
+    let end = key + 1;
+    while (end < lines.length && IN_BLOCK.test(lines[end]!)) end++;
+    const block = lines.slice(key + 1, end).filter((l) => !OWN_ENTRY.test(l));
+    const indent = /^(\s*)-/.exec(block.find((l) => /^\s*-/.test(l)) ?? '')?.[1] ?? '  ';
+    lines.splice(key + 1, end - key - 1, `${indent}- ${PACKAGE_NAME}`, ...block);
   }
-  const next = lines.join('\n');
+  const next = lines.join(eol);
   if (next === text) return false;
   try {
     writeFileSync(file, next);

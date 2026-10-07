@@ -15,10 +15,16 @@ import { SettingsStore } from './settings-store.ts';
 import { SessionManager } from './session-store.ts';
 import { createRateLimiter } from './ratelimit.ts';
 import { AccessLog } from './access-log.ts';
-import { installGuard, isAuthorizedAsync, type GuardDeps, type LoggerLike } from './guard.ts';
+import {
+  adminAllowed,
+  installGuard,
+  isAuthorizedAsync,
+  type GuardDeps,
+  type LoggerLike,
+} from './guard.ts';
 import { registerAdminApi, jsonResponse } from './admin-api.ts';
 import { createGateway, whitelistAllows, type GatewayHandle } from './gateway.ts';
-import { effectiveLanPort } from './settings.ts';
+import { effectiveLanPort, defaultLanPort } from './settings.ts';
 import { isLoopbackAddress } from './trust.ts';
 import { listLanIps } from './admin-api.ts';
 import type { LanState } from './shared.ts';
@@ -65,6 +71,8 @@ function detectProfile(ctx: Context): string {
 
 /** 启动时等 dsh 登录签名就绪的次数（每次 1 秒）。 */
 const STARTUP_WAIT_TRIES = 15;
+/** 最多记多少条插件签发的 cookie 指纹（过期的会先清掉）。 */
+const MAX_MINTED = 5000;
 /** 安全退出期间自动重查的间隔。 */
 const FAULT_RECHECK_MS = 30_000;
 
@@ -76,9 +84,9 @@ export function apply(ctx: Context, _config: Config): void {
   const settingsStore = new SettingsStore();
   const settings = settingsStore.get();
 
-  // 从旧版本升上来、本机免登录已经关着却没记时间：从现在算起。
-  if (!settings.allowLoopback && settings.localLoginRequiredSince === null)
-    settingsStore.update({ localLoginRequiredSince: Date.now(), lockedMintedCookies: [] });
+  // 第一次运行（或从旧版本升上来）：从现在开始记录插件签发的 cookie。
+  if (settings.mintTrackingSince === null)
+    settingsStore.update({ mintTrackingSince: Date.now(), pluginMintedCookies: [] }, false);
 
   const sessions = new SessionManager({
     secret: settings.sessionSecret!,
@@ -123,18 +131,22 @@ export function apply(ctx: Context, _config: Config): void {
     fault: () => criticalFailures(rt.checks).length > 0,
     update: { state: 'idle', current: version },
     gatewayToken: randomBytes(32).toString('hex'),
-    recordLockedMint: (fingerprint, expiresAt) => {
+    recordPluginMint: (fingerprint, expiresAt) => {
       const now = Date.now();
-      const kept = settingsStore.get().lockedMintedCookies.filter((x) => x.exp > now);
-      settingsStore.update({
-        lockedMintedCookies: [...kept, { h: fingerprint, exp: expiresAt }].slice(-500),
-      });
+      const kept = settingsStore.get().pluginMintedCookies.filter((x) => x.exp > now);
+      // 只写不通知：记一条指纹不算改设置，不用重跑运行检查。
+      settingsStore.update(
+        { pluginMintedCookies: [...kept, { h: fingerprint, exp: expiresAt }].slice(-MAX_MINTED) },
+        false,
+      );
     },
+    // 等守卫依赖装好后换成真的。
+    adminAllowed: () => Promise.resolve(false),
     // 下面两个等局域网入口装好后换成真的。
     syncLan: () => Promise.resolve(undefined),
     lanState: () => ({
       host: '',
-      port: webServer.port + 1,
+      port: defaultLanPort(webServer.port),
       portCustom: false,
       listening: false,
       hostMissing: false,
@@ -151,8 +163,9 @@ export function apply(ctx: Context, _config: Config): void {
     isPublicRoute,
     suspended: () => rt.fault(),
     gatewayToken: rt.gatewayToken,
-    recordLockedMint: (fingerprint, expiresAt) => rt.recordLockedMint(fingerprint, expiresAt),
+    recordPluginMint: (fingerprint, expiresAt) => rt.recordPluginMint(fingerprint, expiresAt),
   };
+  rt.adminAllowed = (req) => adminAllowed(req, guardDeps);
   // 交给 ctx.effect：插件停用时自动撤销。
   ctx.effect(() => installGuard(guardDeps));
   // 提前读 dsh 的签名密钥，Desktop 的第一个请求就要用。

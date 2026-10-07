@@ -137,9 +137,13 @@ export function createGateway(rt: Runtime): GatewayHandle {
     }
     if (nativeCookie !== undefined) {
       // 只附 `name=value`，不带 Set-Cookie 的属性段。
+      // 设备自己带来的 dsh cookie 先去掉，免得 dsh 读到的是它而不是这一张。
       const pair = nativeCookie.slice(0, nativeCookie.indexOf(';'));
-      const existing = headers.cookie ?? '';
-      headers.cookie = existing ? `${existing}; ${pair}` : pair;
+      const existing = (headers.cookie ?? '')
+        .split(';')
+        .map((c) => c.trim())
+        .filter((c) => c !== '' && !c.startsWith(NATIVE_COOKIE_PREFIX));
+      headers.cookie = [...existing, pair].join('; ');
     }
     return headers;
   }
@@ -200,7 +204,9 @@ export function createGateway(rt: Runtime): GatewayHandle {
       return;
     }
     if (path === '/api/remote-access/login') {
-      void handleLoginPost(rt, req, res, { ip, exempt: false });
+      handleLoginPost(rt, req, res, { ip, exempt: false }).catch(() => {
+        if (!res.headersSent) jsonResponse(res, 500, { error: 'login failed' });
+      });
       return;
     }
     if (path === '/api/remote-access/logout') {
@@ -235,51 +241,57 @@ export function createGateway(rt: Runtime): GatewayHandle {
     }
 
     // 转发给 dsh。
-    void mintLoopbackCookie().then((nativeCookie) => {
-      if (nativeCookie === undefined) {
-        // dsh 还没准备好（启动中、签名读不到）：页面给「dsh 还没准备好」，接口回 JSON。
-        if ((req.method === 'GET' || req.method === 'HEAD') && isDocumentNavigation(req))
-          sendHtml(res, 503, loginPageHtml({ state: 'busy', host: computerName() }));
-        else jsonResponse(res, 503, { error: '服务启动中，请稍后重试', code: 'not-ready' });
-        return;
-      }
-      const headers = forwardHeaders(req, nativeCookie);
-      const proxyReq = httpRequest(
-        {
-          host: '127.0.0.1',
-          port: targetPort(),
-          method: req.method,
-          path: req.url,
-          headers,
-        },
-        (proxyRes) => {
-          const respHeaders: Record<string, string | string[]> = {};
-          for (const [k, v] of Object.entries(proxyRes.headers)) {
-            if (v === undefined) continue;
-            if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-            if (k.toLowerCase() === 'set-cookie') {
-              // dsh 的 cookie 不发给局域网设备，免得被踢后还留着一张。
-              const kept = (Array.isArray(v) ? v : [v]).filter(
-                (c) => !c.trim().startsWith(NATIVE_COOKIE_PREFIX),
-              );
-              if (kept.length > 0) respHeaders[k] = kept;
-              continue;
+    void mintLoopbackCookie().then(
+      (nativeCookie) => {
+        if (nativeCookie === undefined) {
+          // dsh 还没准备好（启动中、签名读不到）：页面给「dsh 还没准备好」，接口回 JSON。
+          if ((req.method === 'GET' || req.method === 'HEAD') && isDocumentNavigation(req))
+            sendHtml(res, 503, loginPageHtml({ state: 'busy', host: computerName() }));
+          else jsonResponse(res, 503, { error: '服务启动中，请稍后重试', code: 'not-ready' });
+          return;
+        }
+        const headers = forwardHeaders(req, nativeCookie);
+        const proxyReq = httpRequest(
+          {
+            host: '127.0.0.1',
+            port: targetPort(),
+            method: req.method,
+            path: req.url,
+            headers,
+          },
+          (proxyRes) => {
+            const respHeaders: Record<string, string | string[]> = {};
+            for (const [k, v] of Object.entries(proxyRes.headers)) {
+              if (v === undefined) continue;
+              if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+              if (k.toLowerCase() === 'set-cookie') {
+                // dsh 的 cookie 不发给局域网设备，免得被踢后还留着一张。
+                const kept = (Array.isArray(v) ? v : [v]).filter(
+                  (c) => !c.trim().startsWith(NATIVE_COOKIE_PREFIX),
+                );
+                if (kept.length > 0) respHeaders[k] = kept;
+                continue;
+              }
+              respHeaders[k] = v;
             }
-            respHeaders[k] = v;
-          }
-          res.writeHead(proxyRes.statusCode ?? 502, respHeaders);
-          proxyRes.pipe(res);
-        },
-      );
-      proxyReq.on('error', () => {
+            res.writeHead(proxyRes.statusCode ?? 502, respHeaders);
+            proxyRes.pipe(res);
+          },
+        );
+        proxyReq.on('error', () => {
+          if (!res.headersSent) jsonResponse(res, 502, { error: 'bad gateway' });
+          else res.destroy();
+        });
+        req.on('error', () => proxyReq.destroy());
+        // 设备那头断了，通往 dsh 的这头也断掉。
+        res.on('close', () => proxyReq.destroy());
+        req.pipe(proxyReq);
+      },
+      () => {
         if (!res.headersSent) jsonResponse(res, 502, { error: 'bad gateway' });
         else res.destroy();
-      });
-      req.on('error', () => proxyReq.destroy());
-      // 设备那头断了，通往 dsh 的这头也断掉。
-      res.on('close', () => proxyReq.destroy());
-      req.pipe(proxyReq);
-    });
+      },
+    );
   }
 
   function handleUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
@@ -304,44 +316,53 @@ export function createGateway(rt: Runtime): GatewayHandle {
     rt.lastSeenByIp.set(normalizeIp(ip) ?? ip, Date.now());
     upgraded.set(socket, { ip: normalizeIp(ip) ?? ip, sid });
     socket.once('close', () => upgraded.delete(socket));
-    void mintLoopbackCookie().then((nativeCookie) => {
-      // 等 cookie 的时候连接可能已经被踢了。
-      if (socket.destroyed) return;
-      if (nativeCookie === undefined) {
-        socket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
-        return;
-      }
-      const headers = forwardHeaders(req, nativeCookie, { upgrade: true });
-      const proxyReq = httpRequest({
-        host: '127.0.0.1',
-        port: targetPort(),
-        method: req.method,
-        path: req.url,
-        headers,
-      });
-      proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
-        // 回 101，然后两头对接。
-        const lines = ['HTTP/1.1 101 Switching Protocols'];
-        for (const [k, v] of Object.entries(proxyRes.headers)) {
-          if (v === undefined) continue;
-          lines.push(`${k}: ${Array.isArray(v) ? v.join(', ') : v}`);
+    void mintLoopbackCookie().then(
+      (nativeCookie) => {
+        // 等 cookie 的时候连接可能已经被踢了。
+        if (socket.destroyed) return;
+        if (nativeCookie === undefined) {
+          socket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+          return;
         }
-        socket.write(`${lines.join('\r\n')}\r\n\r\n`);
-        if (proxyHead && proxyHead.length) socket.write(proxyHead);
-        // 一头断了，另一头也断开。
-        socket.on('close', () => proxySocket.destroy());
-        proxySocket.on('close', () => socket.destroy());
-        socket.on('error', () => proxySocket.destroy());
-        proxySocket.on('error', () => socket.destroy());
-        proxySocket.pipe(socket);
-        socket.pipe(proxySocket);
-      });
-      // dsh 没同意升级：关掉，不让客户端干等。
-      proxyReq.on('response', () => socket.destroy());
-      proxyReq.on('error', () => socket.destroy());
-      socket.once('close', () => proxyReq.destroy());
-      proxyReq.end(head);
-    });
+        const headers = forwardHeaders(req, nativeCookie, { upgrade: true });
+        const proxyReq = httpRequest({
+          host: '127.0.0.1',
+          port: targetPort(),
+          method: req.method,
+          path: req.url,
+          headers,
+        });
+        proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+          // 回 101，然后两头对接。
+          const lines = ['HTTP/1.1 101 Switching Protocols'];
+          for (const [k, v] of Object.entries(proxyRes.headers)) {
+            if (v === undefined) continue;
+            // dsh 的 cookie 不发给局域网设备（同普通请求）。
+            if (k.toLowerCase() === 'set-cookie') {
+              for (const c of Array.isArray(v) ? v : [v])
+                if (!c.trim().startsWith(NATIVE_COOKIE_PREFIX)) lines.push(`${k}: ${c}`);
+              continue;
+            }
+            lines.push(`${k}: ${Array.isArray(v) ? v.join(', ') : v}`);
+          }
+          socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+          if (proxyHead && proxyHead.length) socket.write(proxyHead);
+          // 一头断了，另一头也断开。
+          socket.on('close', () => proxySocket.destroy());
+          proxySocket.on('close', () => socket.destroy());
+          socket.on('error', () => proxySocket.destroy());
+          proxySocket.on('error', () => socket.destroy());
+          proxySocket.pipe(socket);
+          socket.pipe(proxySocket);
+        });
+        // dsh 没同意升级：关掉，不让客户端干等。
+        proxyReq.on('response', () => socket.destroy());
+        proxyReq.on('error', () => socket.destroy());
+        socket.once('close', () => proxyReq.destroy());
+        proxyReq.end(head);
+      },
+      () => socket.destroy(),
+    );
   }
 
   return {

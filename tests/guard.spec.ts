@@ -69,9 +69,15 @@ function mockWebServer() {
       fallback = h;
       return () => {};
     },
-    tapIndex: () => () => {},
+    tapIndex: (fn: (html: string) => string) => {
+      tapped.push(fn);
+      return () => {};
+    },
   } as unknown as WebServer;
 }
+
+/** 守卫注入首页的改写函数（tapIndex 收到的）。 */
+const tapped: ((html: string) => string)[] = [];
 
 const mockSecret = Buffer.from('0123456789abcdef0123456789abcdef', 'utf8');
 const mockCredentials: CredentialsLike = {
@@ -213,7 +219,7 @@ describe('route wrapping', () => {
     expect(res.body).toBe('handled');
   });
 
-  it('passes through when native cookie is already present', async () => {
+  it('已带 dsh cookie 的已登录请求：不再补签，直接交给原处理器', async () => {
     settings.allowLoopback = false;
     const token = sessions.create('admin', '127.0.0.1', 'UA');
     const route: WebRoute = {
@@ -249,7 +255,11 @@ describe('route wrapping', () => {
     expect(res.body).toBe('status');
   });
 
-  it('injects index script via tapIndex', () => {
-    expect(ws.exact).toBeDefined();
+  it('往首页注入脚本：让局域网设备上的 dsh 前端按本机处理，并补上 crypto.randomUUID', () => {
+    const fn = tapped.at(-1);
+    expect(fn).toBeDefined();
+    const html = fn!('<html><head></head><body></body></html>');
+    expect(html).toContain('ownsHost: true');
+    expect(html).toContain('crypto.randomUUID');
   });
 });

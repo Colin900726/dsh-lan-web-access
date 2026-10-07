@@ -172,6 +172,8 @@ body[data-ds-dark-theme] .dla {
 
 .dla .group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
 .dla .group-head .count { font-weight: 400; color: var(--t3); }
+/* 整行是按钮时，里面只能放 span；按块级排，和普通行一样。 */
+.dla button.row .row-main, .dla button.row .row-label { display: block; }
 .dla button.row { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; color: inherit; font: inherit; transition: background var(--dur-press) ease-out; }
 .dla button.row:hover { background: var(--hover); }
 .dla button.row:active { background: var(--press); }

@@ -1,5 +1,6 @@
 /** 各模块共用的运行时对象。 */
 
+import type { IncomingMessage } from 'node:http';
 import type { Context } from '@deepseek-ai/cordis';
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver';
 import type { SettingsStore } from './settings-store.ts';
@@ -39,5 +40,7 @@ export interface Runtime {
   /** 局域网入口转发时带的令牌（每次启动随机生成）。 */
   gatewayToken: string;
   /** 记下插件自己签发的 cookie 指纹（见 guard.ts）。 */
-  recordLockedMint: (fingerprint: string, expiresAt: number) => void;
+  recordPluginMint: (fingerprint: string, expiresAt: number) => void;
+  /** 本机管理操作是否放行：本机免登录关着时要登录（见 guard.ts adminAllowed）。 */
+  adminAllowed: (req: IncomingMessage) => Promise<boolean>;
 }

@@ -1,6 +1,7 @@
-/** 访问记录：内存里留最近 200 条。 */
+/** 访问记录：内存里留最近 ACCESS_LOG_MAX 条。 */
 
 import type { AccessLogEntry } from './settings.ts';
+import { ACCESS_LOG_MAX } from './shared.ts';
 
 /** 会合并的拒绝类记录，以及合并的时间窗口。 */
 const MERGED_KINDS = new Set<AccessLogEntry['kind']>([
@@ -14,7 +15,7 @@ export class AccessLog {
   private entries: AccessLogEntry[] = [];
   private readonly max: number;
 
-  constructor(max = 200) {
+  constructor(max = ACCESS_LOG_MAX) {
     this.max = max;
   }
 

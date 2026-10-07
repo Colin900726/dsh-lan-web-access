@@ -163,6 +163,9 @@ function UpdateRow({
           {update.reason === 'no-command'
             ? u.failed['no-command'](update.command ?? '')
             : u.failed[update.reason ?? 'failed']}
+          {update.reason !== 'no-command' && update.command !== undefined
+            ? ` ${u.manual(update.command)}`
+            : null}
         </>
       );
       action = (
@@ -206,13 +209,22 @@ export function AboutPanel({
   const mounted = useMounted();
   /** 查版本和点更新各用各的序号：更新进行中切走再切回来查一次，不能把更新的结果作废。 */
   const checkSeq = useRef(0);
+  /** 点更新的请求没送到（或中途断了）：服务端可能其实在更新，之后以轮询到的结果为准。 */
+  const postLost = useRef(false);
 
   // 更新在服务端跑，界面靠轮询状态跟着变。
   const serverUpdate = status.update;
   useEffect(() => {
     if (serverUpdate === undefined) return;
     if (serverUpdate.state === 'done' || serverUpdate.state === 'failed')
-      setUpdate((u) => (u?.state === 'running' ? serverUpdate : u));
+      setUpdate((u) => {
+        if (u?.state === 'running') return serverUpdate;
+        if (postLost.current && u?.state === 'failed') {
+          postLost.current = false;
+          return serverUpdate;
+        }
+        return u;
+      });
   }, [serverUpdate]);
 
   const check = async (): Promise<void> => {
@@ -233,16 +245,19 @@ export function AboutPanel({
     // 更新期间回来的「查版本」结果作废（它可能是点更新之前发出的）。
     checkSeq.current += 1;
     setUpdate((u) => ({ ...(u ?? { current: status.version }), state: 'running' }));
+    postLost.current = false;
     const result = await postJson('update', {});
     if (!mounted.current) return;
     if (result.ok) setUpdate(result.data as UpdateState);
-    else
+    else {
+      postLost.current = result.kind === 'network';
       setUpdate((u) => ({
         ...(u ?? { current: status.version }),
         state: 'failed',
         // 请求没送到才说「连不上」，被拒按一般失败说。
         reason: result.kind === 'network' ? 'network' : 'failed',
       }));
+    }
     onChanged();
   };
 

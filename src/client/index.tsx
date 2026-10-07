@@ -364,9 +364,7 @@ function Hero({
       </div>
       <div className="hero-body">
         <h1 className="hero-title">{t.title}</h1>
-        <p className="hero-sub" role="status">
-          {sub}
-        </p>
+        <p className="hero-sub">{sub}</p>
       </div>
       {status?.local === true && (
         <Switch checked={enabled} label={t.hero.switchLabel} busy={busy} onToggle={onToggle} />
@@ -375,7 +373,7 @@ function Hero({
   );
 }
 
-/** 一个保存后可能被拒的开关行：乐观翻转，被拒弹回；需要原地红字的原因给出文字，其余走提示条。 */
+/** 局域网访问地址里用哪个 IP：选了网卡就用它，否则自动挑一个。 */
 function preferredAddress(status: Status): string | undefined {
   if (status.lan.host !== '') return status.lan.host;
   return pickLanAddress(status.lanIps ?? []);
@@ -483,16 +481,12 @@ function ConnPanel({
                 </button>
               </p>
             </div>
-            {status.local ? (
-              <Switch
-                checked={local.checked}
-                label={t.conn.localLabel}
-                busy={local.busy}
-                onToggle={local.toggle}
-              />
-            ) : (
-              <span className="row-value">{local.checked ? t.readOnly.on : t.readOnly.off}</span>
-            )}
+            <Switch
+              checked={local.checked}
+              label={t.conn.localLabel}
+              busy={local.busy}
+              onToggle={local.toggle}
+            />
           </div>
           <div className="row">
             <div className="row-main">
@@ -502,16 +496,12 @@ function ConnPanel({
                 alert={lan.inlineError ? { kind: 'bad', text: lan.inlineError } : undefined}
               />
             </div>
-            {status.local ? (
-              <Switch
-                checked={lan.checked}
-                label={t.conn.lanLabel}
-                busy={lan.busy}
-                onToggle={lan.toggle}
-              />
-            ) : (
-              <span className="row-value">{lan.checked ? t.readOnly.on : t.readOnly.off}</span>
-            )}
+            <Switch
+              checked={lan.checked}
+              label={t.conn.lanLabel}
+              busy={lan.busy}
+              onToggle={lan.toggle}
+            />
           </div>
         </div>
         {dim && <p className="group-foot">{t.hero.keptWhileOff}</p>}
@@ -519,7 +509,7 @@ function ConnPanel({
 
       {showLanEntry && (
         <div ref={lanGroupRef} className="panel">
-          {status.local && status.lan.listening && !status.lan.hintDone && (
+          {status.lan.listening && !status.lan.hintDone && (
             <div className="notice" role="note">
               <InfoIcon />
               <div>
@@ -602,16 +592,34 @@ function LanEntry({
     else showToast({ kind: 'bad', text: failureText(result) });
   };
 
-  const changeNic = async (host: string): Promise<void> => {
-    if (nicSaving()) return;
+  // 网卡：选完立刻显示新值；上一次还没保存完就排队，以最后一次为准；失败弹回并原地说原因。
+  const [nicShown, setNicShown] = useState<string | undefined>();
+  const nicQueued = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (nicShown === status.lan.host && !nicSaving() && nicQueued.current === undefined)
+      setNicShown(undefined);
+  }, [status.lan.host, nicShown, nicSaving]);
+  const sendNic = async (host: string): Promise<void> => {
     setNicAlert(undefined);
     const result = await saveNic({ lanHost: host });
+    const next = nicQueued.current;
+    if (next !== undefined) {
+      nicQueued.current = undefined;
+      await sendNic(next);
+      return;
+    }
     if (result === undefined || result.ok || !mounted.current) return;
+    setNicShown(undefined);
     if (result.kind === 'rejected' && result.code === ERROR_CODES.portInUse)
       setNicAlert(t.conn.portInUse(status.lan.port));
     else if (result.kind === 'rejected' && result.code === ERROR_CODES.hostUnavailable)
       setNicAlert(t.conn.nicMissing);
     else showToast({ kind: 'bad', text: failureText(result) });
+  };
+  const changeNic = (host: string): void => {
+    setNicShown(host);
+    if (nicSaving()) nicQueued.current = host;
+    else void sendNic(host);
   };
 
   const ips = status.lanIps ?? [];
@@ -656,28 +664,24 @@ function LanEntry({
               }
             />
           </div>
-          {status.local ? (
-            <select
-              className="select"
-              aria-label={t.conn.nicLabel}
-              value={status.lan.host}
-              onChange={(e) => void changeNic(e.target.value)}
-            >
-              <option value="">{t.conn.nicAll}</option>
-              {ips.map((i) => (
-                <option key={`${i.name}-${i.address}`} value={i.address}>
-                  {isOverlay(i.address)
-                    ? `${i.name} · ${t.conn.nicOverlay} · ${i.address}`
-                    : `${i.name} · ${i.address}`}
-                </option>
-              ))}
-              {status.lan.host !== '' && !ips.some((i) => i.address === status.lan.host) && (
-                <option value={status.lan.host}>{status.lan.host}</option>
-              )}
-            </select>
-          ) : (
-            <span className="row-value">{status.lan.host || t.conn.nicAll}</span>
-          )}
+          <select
+            className="select"
+            aria-label={t.conn.nicLabel}
+            value={nicShown ?? status.lan.host}
+            onChange={(e) => changeNic(e.target.value)}
+          >
+            <option value="">{t.conn.nicAll}</option>
+            {ips.map((i) => (
+              <option key={`${i.name}-${i.address}`} value={i.address}>
+                {isOverlay(i.address)
+                  ? `${i.name} · ${t.conn.nicOverlay} · ${i.address}`
+                  : `${i.name} · ${i.address}`}
+              </option>
+            ))}
+            {status.lan.host !== '' && !ips.some((i) => i.address === status.lan.host) && (
+              <option value={status.lan.host}>{status.lan.host}</option>
+            )}
+          </select>
         </div>
         <div className="row">
           <div className="row-main">
@@ -692,33 +696,29 @@ function LanEntry({
               }
             />
           </div>
-          {status.local ? (
-            <input
-              className="field num"
-              inputMode="numeric"
-              aria-label={t.conn.portLabel}
-              aria-invalid={portAlert?.kind === 'bad' || undefined}
-              value={portText}
-              onChange={(e) => {
-                setPortText(e.target.value);
-                if (portAlert?.kind === 'bad') setPortAlert(undefined);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void commitPort();
-                // 正在改端口时按 Esc 只撤销这次输入，不关设置窗口；没在改时交给 dsh 关窗口。
-                if (e.key === 'Escape' && (portText !== String(status.lan.port) || portAlert)) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.nativeEvent.stopImmediatePropagation();
-                  setPortText(String(status.lan.port));
-                  setPortAlert(undefined);
-                }
-              }}
-              onBlur={() => void commitPort()}
-            />
-          ) : (
-            <span className="row-value mono">{status.lan.port}</span>
-          )}
+          <input
+            className="field num"
+            inputMode="numeric"
+            aria-label={t.conn.portLabel}
+            aria-invalid={portAlert?.kind === 'bad' || undefined}
+            value={portText}
+            onChange={(e) => {
+              setPortText(e.target.value);
+              if (portAlert?.kind === 'bad') setPortAlert(undefined);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commitPort();
+              // 正在改端口时按 Esc 只撤销这次输入，不关设置窗口；没在改时交给 dsh 关窗口。
+              if (e.key === 'Escape' && (portText !== String(status.lan.port) || portAlert)) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.nativeEvent.stopImmediatePropagation();
+                setPortText(String(status.lan.port));
+                setPortAlert(undefined);
+              }
+            }}
+            onBlur={() => void commitPort()}
+          />
         </div>
       </div>
       <p className="group-foot warn">

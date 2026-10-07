@@ -2,11 +2,11 @@
  * 登录页（独立网页）。几种状态：
  * - login 输密码；locked 错太多次，倒计时；
  * - deny 设备不在允许列表，写出它的 IP 和添加方法（403）；
- * - busy dsh 还没准备好，每 5 秒重试（503）。
+ * - busy dsh 还没准备好，隔几秒自动重试（503）。
  */
 
 /** 登录页上的全部文字。 */
-import { ERROR_CODES } from './shared.ts';
+import { ERROR_CODES, LOGIN_RETRY_SECONDS } from './shared.ts';
 
 const TEXT = {
   title: '登录 dsh',
@@ -18,6 +18,7 @@ const TEXT = {
   keep: (days: number) => `登录后 ${days} 天内不用再输`,
   wrong: (left: number | string, wait: number) => `密码不对。再错 ${left} 次要等 ${wait} 秒`,
   network: '网络错误，请重试',
+  failed: '登录没成功，请稍后重试',
   lockedTitle: '稍等一下',
   lockedWho: (n: number) => `密码连续错了 ${n} 次`,
   lockedButton: (s: number | string) => `${s} 秒后再试`,
@@ -33,7 +34,7 @@ const TEXT = {
   denyRetry: '已经加好了，重新打开',
   busyTitle: 'dsh 还没准备好',
   busyWho: (host: string) => `${host} 上的 dsh 正在启动，或局域网入口已暂停`,
-  busyAuto: '每 5 秒自动重试',
+  busyAuto: `每 ${LOGIN_RETRY_SECONDS} 秒自动重试`,
   busyRetry: '现在重试',
   insecure: '这是未加密的连接，只在家里、公司内网或 Tailscale 这类组网里使用。',
 } as const;
@@ -179,7 +180,7 @@ export function loginPageHtml(view: LoginView): string {
       'busy',
       false,
     );
-    script = 'setTimeout(function () { location.reload(); }, 5000);';
+    script = `setTimeout(function () { location.reload(); }, ${LOGIN_RETRY_SECONDS * 1000});`;
   } else {
     const locked = view.state === 'locked';
     cards =
@@ -215,6 +216,7 @@ export function loginPageHtml(view: LoginView): string {
       wrong: TEXT.wrong('{n}', view.lockSeconds),
       lockedButton: TEXT.lockedButton('{n}'),
       network: TEXT.network,
+      failed: TEXT.failed,
       maxFailures: view.maxFailures,
       lockSeconds: view.lockSeconds,
       codes: { locked: ERROR_CODES.locked, wrong: ERROR_CODES.wrongPassword },
@@ -252,6 +254,8 @@ export function loginPageHtml(view: LoginView): string {
   f.addEventListener('submit', function (ev) {
     ev.preventDefault();
     if (b.disabled) return;
+    // 空着不提交，免得白白算错一次。
+    if (p.value === '') { p.focus(); return; }
     b.disabled = true; b.setAttribute('aria-busy', 'true');
     fetch('/api/remote-access/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: p.value }) })
       .then(function (res) { return res.json().catch(function () { return {}; }).then(function (d) { return { status: res.status, d: d }; }); })
@@ -265,9 +269,9 @@ export function loginPageHtml(view: LoginView): string {
           k.hidden = true; m.hidden = false; m.textContent = fill(T.wrong, x.d.remaining);
           return;
         }
-        // 其他情况重新加载，让服务端给出对的那一页。
-        if (x.status !== 0) { location.reload(); return; }
-        k.hidden = true; m.hidden = false; m.textContent = T.network;
+        // 设备被移出列表（403）、dsh 暂停了（503）：重新加载，让服务端给出对的那一页。
+        if (x.status === 403 || x.status === 503) { location.reload(); return; }
+        k.hidden = true; m.hidden = false; m.textContent = T.failed;
       })
       .catch(function () { b.disabled = false; b.removeAttribute('aria-busy'); k.hidden = true; m.hidden = false; m.textContent = T.network; });
   });

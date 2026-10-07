@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver';
-import { installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
+import { adminAllowed, installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
 import { SessionManager } from '../src/session-store.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import {
@@ -53,8 +53,8 @@ beforeEach(async () => {
     enabled: true,
     allowLoopback: false,
     passwordHash: 'salt:hash',
-    localLoginRequiredSince: SINCE,
-    lockedMintedCookies: [],
+    mintTrackingSince: SINCE,
+    pluginMintedCookies: [],
   };
   deps = {
     webServer: { port: 19387 } as unknown as WebServer,
@@ -63,14 +63,18 @@ beforeEach(async () => {
     getCredentials: () => credentials,
     logger: { info() {}, warn() {} },
     isPublicRoute: (p) => p.startsWith('/api/remote-access/'),
-    recordLockedMint: (h, exp) => settings.lockedMintedCookies.push({ h, exp }),
+    recordPluginMint: (h, exp) => settings.pluginMintedCookies.push({ h, exp }),
   };
   await loadSigningSecret(credentials);
 });
 
 describe('本机免登录关着：Desktop 不受影响（Q-005）', () => {
-  it('Given Desktop 启动时用 dsh 的 token 换 cookie（GET /?token=…，不带浏览器标记），Then 放行交给 dsh 校验', () => {
+  it('Given Desktop 启动时用 dsh 的 token 换 cookie（GET /?token=…），Then 放行交给 dsh 校验', () => {
     expect(isAuthorized(req({ url: '/?token=abc' }), deps)).toBe(true);
+  });
+
+  it('Given 地址栏不是本机（局域网 IP）带着 ?token=，Then 不放行', () => {
+    expect(isAuthorized(req({ url: '/?token=abc', host: '192.168.1.20:19387' }), deps)).toBe(false);
   });
 
   it('Given 换 cookie 那一下，Then 插件不替它补签，dsh 自己的 303 + Set-Cookie 原样回给 Desktop', async () => {
@@ -107,20 +111,28 @@ describe('本机免登录关着：Desktop 不受影响（Q-005）', () => {
     await routes.get('/')!.handler(req({ url: '/?token=abc' }), res);
     expect(status).toBe(303);
     expect(setCookie).toBe('dsh-auth-x=from-dsh; Path=/');
-    expect(settings.lockedMintedCookies).toHaveLength(0);
+    expect(settings.pluginMintedCookies).toHaveLength(0);
   });
 
-  it('Given dsh 在关掉之后签发的 cookie（Desktop 窗口用的），Then 放行', () => {
+  it('Given dsh 签发的 cookie（Desktop 窗口用的），Then 放行', () => {
     expect(isAuthorized(req({ cookie: cookieAt(Date.now()).header }), deps)).toBe(true);
   });
 
-  it('Given 关掉之前签发的 cookie（插件在本机免登录开着时替浏览器补签的），Then 不放行', () => {
+  it('Given Desktop 开着时在设置里关掉开关（窗口的 cookie 签发得比关开关早），When 不重启直接刷新，Then 照常放行', () => {
+    const desktopCookie = cookieAt(SINCE + 1000); // Desktop 启动时用 token 换的
+    settings.allowLoopback = true;
+    expect(isAuthorized(req({ cookie: desktopCookie.header, nav: true }), deps)).toBe(true);
+    settings.allowLoopback = false; // 现在才关
+    expect(isAuthorized(req({ cookie: desktopCookie.header, nav: true }), deps)).toBe(true);
+  });
+
+  it('Given 开始记录插件签发的 cookie 之前签发的（分不清是谁签的），Then 不放行', () => {
     expect(isAuthorized(req({ cookie: cookieAt(SINCE - 1000).header }), deps)).toBe(false);
   });
 
-  it('Given 关着期间插件因密码登录签发的 cookie，Then 不当作 dsh 签发的认（登录失效后不能靠它进来）', () => {
+  it('Given 插件自己签发过的 cookie（开着时补签的、密码登录时附带的），Then 不当作 dsh 签发的认', () => {
     const c = cookieAt(Date.now());
-    settings.lockedMintedCookies.push({
+    settings.pluginMintedCookies.push({
       h: nativeCookieFingerprint(c.value),
       exp: Date.now() + 1e9,
     });
@@ -131,7 +143,7 @@ describe('本机免登录关着：Desktop 不受影响（Q-005）', () => {
     const forged = cookieAt(Date.now(), Buffer.alloc(32, 1));
     expect(isAuthorized(req({ cookie: forged.header }), deps)).toBe(false);
     const expired = cookieAt(Date.now() - 31 * 86_400_000);
-    settings.localLoginRequiredSince = Date.now() - 40 * 86_400_000;
+    settings.mintTrackingSince = Date.now() - 40 * 86_400_000;
     expect(isAuthorized(req({ cookie: expired.header }), deps)).toBe(false);
     const other = cookieAt(Date.now(), secret, 'localhost:19387');
     expect(isAuthorized(req({ cookie: other.header }), deps)).toBe(false);
@@ -183,17 +195,73 @@ describe('真 dsh 里的 credentials 是 cordis 代理：每次拿到的都是�
   });
 });
 
-describe('「本机免登录」开关切换时记下时刻', () => {
-  it('Given 从开变关，Then 记下关掉的时刻、清空插件签发记录；从关变开，Then 清掉', () => {
+describe('本机免登录开着时，插件替本机浏览器补签的 cookie 也记下', () => {
+  it('Given 开关开着、浏览器没带 dsh cookie，When 打开页面，Then 插件补签一张并记下指纹；关掉开关后这张不再放行', async () => {
+    settings.allowLoopback = true;
+    const routes = new Map<string, WebRoute>();
+    const ws = {
+      port: 19387,
+      register: (r: WebRoute) => {
+        routes.set(r.path, r);
+        return () => routes.delete(r.path);
+      },
+      registerUpgrade: () => () => {},
+      registerFallback: () => () => {},
+      tapIndex: () => () => {},
+    } as unknown as WebServer;
+    installGuard({ ...deps, webServer: ws });
+    ws.register({ kind: 'exact', path: '/api/x', handler: () => {} } as unknown as WebRoute);
+    let setCookie = '';
+    const res = {
+      writeHead(_code: number, h: Record<string, string>) {
+        setCookie = h['set-cookie'] ?? setCookie;
+      },
+      setHeader() {},
+      end() {},
+    } as unknown as ServerResponse;
+    await routes.get('/api/x')!.handler(req({ url: '/api/x' }), res);
+    expect(settings.pluginMintedCookies).toHaveLength(1);
+    settings.allowLoopback = false;
+    const header = setCookie.slice(0, setCookie.indexOf(';'));
+    expect(isAuthorized(req({ cookie: header }), deps)).toBe(false);
+  });
+});
+
+describe('「本机免登录」开关切换', () => {
+  it('Given 从开变关、从关变开，Then 不动 cookie 的记录（Desktop 窗口那张照常认）', () => {
     const on = { ...DEFAULT_SETTINGS, passwordHash: 'salt:hash', allowLoopback: true };
     const off = coerceSettingsPatch({ allowLoopback: false }, on, 19387);
-    expect(off.ok && typeof off.patch.localLoginRequiredSince === 'number').toBe(true);
-    expect(off.ok && off.patch.lockedMintedCookies).toEqual([]);
+    expect(off).toEqual({ ok: true, patch: { allowLoopback: false } });
     const again = coerceSettingsPatch(
       { allowLoopback: true },
-      { ...on, allowLoopback: false, localLoginRequiredSince: 1 },
+      { ...on, allowLoopback: false },
       19387,
     );
-    expect(again.ok && again.patch.localLoginRequiredSince).toBe(null);
+    expect(again).toEqual({ ok: true, patch: { allowLoopback: true } });
+  });
+});
+
+describe('本机免登录关着时，管理操作也要登录（用户 2026-10-07 拍板「堵上」）', () => {
+  it('Given 开关开着，Then 本机管理操作放行', async () => {
+    settings.allowLoopback = true;
+    expect(await adminAllowed(req({}), deps)).toBe(true);
+  });
+  it('Given 开关关着、本机没有任何登录（开发者工具、命令行），Then 不放行', async () => {
+    expect(await adminAllowed(req({}), deps)).toBe(false);
+  });
+  it('Given 开关关着、带着插件签发过的 cookie，Then 不放行', async () => {
+    const c = cookieAt(Date.now());
+    settings.pluginMintedCookies.push({
+      h: nativeCookieFingerprint(c.value),
+      exp: Date.now() + 1e9,
+    });
+    expect(await adminAllowed(req({ cookie: c.header }), deps)).toBe(false);
+  });
+  it('Given 开关关着、Desktop 窗口（dsh 签发的 cookie），Then 放行', async () => {
+    expect(await adminAllowed(req({ cookie: cookieAt(Date.now()).header }), deps)).toBe(true);
+  });
+  it('Given 开关关着、用密码登录过的本机浏览器，Then 放行', async () => {
+    const token = deps.sessions.create('admin', '127.0.0.1', 'UA');
+    expect(await adminAllowed(req({ cookie: `dsh_sid=${token}` }), deps)).toBe(true);
   });
 });

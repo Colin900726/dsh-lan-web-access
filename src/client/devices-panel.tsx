@@ -96,8 +96,6 @@ export function DevicesPanel({
 }): ReactElement {
   const [view, setView] = useState<DevicesView | undefined>();
   const [loadFailed, setLoadFailed] = useState(false);
-  /** 最新一次读到的列表（撤销移出时用它，不用移出那一刻的旧列表）。 */
-  const viewRef = useRef<DevicesView | undefined>(undefined);
   /** 退出登录正在发：连点不重复发。 */
   const kicking = useRef(false);
   const [openId, setOpenId] = useState<string | undefined>();
@@ -115,7 +113,6 @@ export function DevicesPanel({
       return;
     }
     setLoadFailed(false);
-    viewRef.current = v;
     setView(v);
   }, [local, mounted]);
 
@@ -215,20 +212,27 @@ export function DevicesPanel({
       kind: 'plain',
       text: t.dev.removed(label(entry)),
       undo: () => {
-        // 撤销：放回当前列表的原位置（已失效的登录回不来，要重新输密码）。
-        const current = (viewRef.current?.entries ?? []).map(({ id, name, value }) => ({
-          id,
-          name,
-          value,
-        }));
-        if (current.some((e) => e.value === entry.value)) return;
-        const restored = [...current];
-        restored.splice(Math.min(index, restored.length), 0, {
-          id: entry.id,
-          name: entry.name,
-          value: entry.value,
-        });
-        void writeList(restored);
+        // 撤销：先重新读一次列表，放回原位置（已失效的登录回不来，要重新输密码）。
+        void (async () => {
+          const fresh = await getJson<DevicesView>('devices');
+          if (!mounted.current) return;
+          if (fresh === undefined) {
+            showToast({ kind: 'bad', text: t.dev.undoFailed });
+            return;
+          }
+          const current = fresh.entries.map(({ id, name, value }) => ({ id, name, value }));
+          if (current.some((e) => e.value === entry.value)) return;
+          const restored = [...current];
+          restored.splice(Math.min(index, restored.length), 0, {
+            id: entry.id,
+            name: entry.name,
+            value: entry.value,
+          });
+          const result = await saveList({ whitelist: restored });
+          if (!mounted.current) return;
+          if (result === undefined) showToast({ kind: 'bad', text: t.dev.undoFailed });
+          else if (!result.ok) showToast({ kind: 'bad', text: failureText(result) });
+        })();
       },
     });
   };
@@ -271,15 +275,15 @@ export function DevicesPanel({
                     className="row"
                     onClick={() => setOpenId(entry.id)}
                   >
-                    <div className="row-main">
-                      <p className="row-label">{label(entry)}</p>
-                      <p className="row-desc inline">
+                    <span className="row-main">
+                      <span className="row-label">{label(entry)}</span>
+                      <span className="row-desc inline">
                         <span className="mono">{entry.value}</span>
                         <span>·</span>
                         <span className={`dot${line.dot === 'ok' ? ' ok' : ''}`} />
                         <span>{line.text}</span>
-                      </p>
-                    </div>
+                      </span>
+                    </span>
                     <ChevronIcon />
                   </button>
                 );
@@ -288,9 +292,9 @@ export function DevicesPanel({
                 <span className="plus">
                   <PlusIcon />
                 </span>
-                <div className="row-main">
-                  <p className="row-label">{t.dev.add}</p>
-                </div>
+                <span className="row-main">
+                  <span className="row-label">{t.dev.add}</span>
+                </span>
               </button>
             </>
           )}

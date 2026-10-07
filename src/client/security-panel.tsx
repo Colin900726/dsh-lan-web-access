@@ -1,11 +1,16 @@
 /**
- * 「安全」分段：管理密码（原地输入，至少 12 位）、登录保持天数、清除密码（唯一弹确认的操作）、
+ * 「安全」分段：管理密码（原地输入，有最少位数）、登录保持天数、清除密码（唯一弹确认的操作）、
  * 访问记录（最近 3 条，可展开全部并筛选）。
  */
 
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ERROR_CODES, SESSION_MAX_AGE_CHOICES, type RemoteAccessStatus } from '../shared.ts';
+import {
+  ERROR_CODES,
+  MIN_PASSWORD_LENGTH,
+  SESSION_MAX_AGE_CHOICES,
+  type RemoteAccessStatus,
+} from '../shared.ts';
 import type { AccessLogEntry } from '../settings.ts';
 import { zh as t } from './strings.ts';
 import {
@@ -26,7 +31,6 @@ import {
   type Toast,
 } from './ui.tsx';
 
-const MIN_PASSWORD = 12;
 const RECENT = 3;
 /** 访问记录多久刷新一次。 */
 const LOG_POLL_MS = 5000;
@@ -172,9 +176,9 @@ export function SecurityPanel({
           </div>
           {status.registered && (
             <button type="button" className="row danger" onClick={() => setClearing(true)}>
-              <div className="row-main">
-                <p className="row-label">{t.sec.clear}</p>
-              </div>
+              <span className="row-main">
+                <span className="row-label">{t.sec.clear}</span>
+              </span>
             </button>
           )}
         </div>
@@ -244,7 +248,7 @@ function PasswordRows({
     if (editing && !first) inputRef.current?.focus();
   }, [editing, first]);
 
-  const left = MIN_PASSWORD - value.length;
+  const left = MIN_PASSWORD_LENGTH - value.length;
   const hintText =
     value.length === 0
       ? first
@@ -292,7 +296,6 @@ function PasswordRows({
           <button
             type="button"
             className="btn sm"
-            aria-controls="dla-pw-edit"
             aria-expanded={false}
             onClick={() => setEditing(true)}
           >

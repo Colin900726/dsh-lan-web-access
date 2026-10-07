@@ -104,6 +104,7 @@ export declare const zh: {
         readonly loginSince: (date: string) => string;
         readonly remove: "移出列表";
         readonly removed: (name: string) => string;
+        readonly undoFailed: "没能撤销，可以在「添加设备」里重新加上";
         readonly cancel: "取消";
         readonly done: "完成";
         readonly addTitle: "添加设备";
@@ -195,13 +196,15 @@ export declare const zh: {
             readonly latest: (v: string) => string;
             readonly available: (cur: string, next: string) => readonly [`\u5F53\u524D ${string} \u00B7 `, `\u6709\u65B0\u7248\u672C ${string}`];
             readonly unavailable: (cur: string) => string;
-            readonly running: "大约需要 30 秒，别关 dsh";
+            readonly running: "通常不到 1 分钟；网络不好时会自动换下载来源，最长几分钟，别关 dsh";
             readonly done: (v: string) => string;
             readonly failed: {
                 readonly network: "连不上更新服务器。检查网络后重试，设置不受影响";
                 readonly 'no-command': (cmd: string) => string;
                 readonly failed: "更新没成功，设置不受影响。可以重试";
             };
+            /** 失败时附在原因后面的手动命令。 */
+            readonly manual: (cmd: string) => string;
             readonly check: "检查更新";
             readonly to: (v: string) => string;
             readonly busy: "更新中…";
@@ -276,6 +279,8 @@ export declare const zh: {
         /** dsh 收到了但拒绝了，又没有更具体的原因。 */
         readonly rejected: "没能保存，请刷新页面后再试";
         readonly localOnly: "只能在装 dsh 的电脑本机上修改";
+        /** 本机免登录关着、这个浏览器还没登录。 */
+        readonly loginRequired: "需要先登录：刷新页面，输入管理密码后再改";
         /** 保存成功后重新读取状态失败（页面保留原来的内容）。 */
         readonly refreshFailed: "已保存，但没能刷新状态，请稍后刷新页面";
         /** 定时刷新读不到状态（dsh 停了、断网）：只提示一次，恢复后不再提示。 */

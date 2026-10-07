@@ -6,7 +6,11 @@
 
 import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'node:crypto';
 import type { ActiveSession } from './settings.ts';
-import { MIN_PASSWORD_LENGTH, isValidSessionMaxAgeDays } from './settings.ts';
+import {
+  DEFAULT_SESSION_MAX_AGE_DAYS,
+  MIN_PASSWORD_LENGTH,
+  isValidSessionMaxAgeDays,
+} from './settings.ts';
 
 export { MIN_PASSWORD_LENGTH };
 
@@ -101,7 +105,9 @@ export class SessionManager {
 
   constructor(opts: SessionManagerOptions) {
     this.secret = opts.secret;
-    this.maxAgeDays = isValidSessionMaxAgeDays(opts.maxAgeDays) ? opts.maxAgeDays : 14;
+    this.maxAgeDays = isValidSessionMaxAgeDays(opts.maxAgeDays)
+      ? opts.maxAgeDays
+      : DEFAULT_SESSION_MAX_AGE_DAYS;
     this.now = opts.now ?? Date.now;
   }
 

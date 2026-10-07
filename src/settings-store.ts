@@ -69,11 +69,11 @@ export class SettingsStore {
     return this.settings;
   }
 
-  /** 合并写入并通知监听者。 */
-  update(patch: Partial<Settings>): Settings {
+  /** 合并写入并通知监听者（notify 为 false 时只写不通知，用于记录类数据）。 */
+  update(patch: Partial<Settings>, notify = true): Settings {
     this.settings = { ...this.settings, ...patch };
     this.write(this.settings);
-    for (const fn of this.listeners) fn(this.settings);
+    if (notify) for (const fn of this.listeners) fn(this.settings);
     return this.settings;
   }
 

@@ -23,7 +23,7 @@ export interface GuardDeps {
     /** 局域网入口转发时带的令牌（每次启动随机生成）。 */
     gatewayToken?: string;
     /** 记下插件自己签发的 cookie，以后不把它当成 dsh 签发的。 */
-    recordLockedMint?: (fingerprint: string, expiresAt: number) => void;
+    recordPluginMint?: (fingerprint: string, expiresAt: number) => void;
 }
 /**
  * 请求是否放行：
@@ -34,5 +34,10 @@ export interface GuardDeps {
 export declare function isAuthorized(req: IncomingMessage, deps: GuardDeps): boolean;
 /** isAuthorized 的异步版：签名密钥还没读到时（插件刚启动），先等它读完再判一次。 */
 export declare function isAuthorizedAsync(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
+/**
+ * 本机的管理操作（改设置、改密码等）是否放行。本机免登录开着时都放行；关着时要有有效登录，
+ * 或是 dsh 自己签发的 cookie（Desktop 窗口）。调用前已确认是本机请求。
+ */
+export declare function adminAllowed(req: IncomingMessage, deps: GuardDeps): Promise<boolean>;
 /** 安装守卫，返回撤销函数（插件停用时把改过的东西全部还原）。 */
 export declare function installGuard(deps: GuardDeps): () => void;

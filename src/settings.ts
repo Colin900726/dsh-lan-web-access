@@ -4,7 +4,11 @@
  */
 
 /** 设备白名单条目。 */
-import { SESSION_MAX_AGE_CHOICES } from './shared.ts';
+import {
+  DEFAULT_SESSION_MAX_AGE_DAYS,
+  MIN_PASSWORD_LENGTH,
+  SESSION_MAX_AGE_CHOICES,
+} from './shared.ts';
 
 export interface WhitelistEntry {
   /** 稳定 id（客户端生成）。 */
@@ -74,10 +78,10 @@ export interface Settings {
   sessionMaxAgeDays: number;
   /** 会话签名密钥（第一次启动生成）。 */
   sessionSecret: string | null;
-  /** 「本机免登录」关掉的时间；开着时为 null。关掉之前签发的 cookie 都不再认。 */
-  localLoginRequiredSince: number | null;
-  /** 「本机免登录」关着期间插件自己签发的 cookie 指纹（不当成 dsh 签发的）。 */
-  lockedMintedCookies: { h: string; exp: number }[];
+  /** 开始记录插件签发 cookie 的时间。早于它签发的 dsh cookie 分不清是谁签的，不认。 */
+  mintTrackingSince: number | null;
+  /** 插件自己签发过的 cookie 指纹：「本机免登录」关着时不把它们当成 dsh 签发的。 */
+  pluginMintedCookies: { h: string; exp: number }[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -93,15 +97,13 @@ export const DEFAULT_SETTINGS: Settings = {
   whitelistBypassPassword: false,
   passwordHash: null,
   passwordSetAt: null,
-  localLoginRequiredSince: null,
-  lockedMintedCookies: [],
-  sessionMaxAgeDays: 14,
+  mintTrackingSince: null,
+  pluginMintedCookies: [],
+  sessionMaxAgeDays: DEFAULT_SESSION_MAX_AGE_DAYS,
   sessionSecret: null,
 };
 
-export { SESSION_MAX_AGE_CHOICES };
-export const DEFAULT_SESSION_MAX_AGE_DAYS = 14;
-export const MIN_PASSWORD_LENGTH = 12;
+export { SESSION_MAX_AGE_CHOICES, DEFAULT_SESSION_MAX_AGE_DAYS, MIN_PASSWORD_LENGTH };
 
 export function isValidSessionMaxAgeDays(value: unknown): value is number {
   return (
@@ -116,15 +118,31 @@ export function isPortInRange(port: unknown): port is number {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
-/** 局域网入口实际用的端口：没设过或和主端口冲突时，用主端口 + 1。 */
+/** 局域网入口的默认端口：dsh 主端口 + 1。 */
+export function defaultLanPort(mainPort: number): number {
+  return mainPort + 1;
+}
+
+/** 局域网入口实际用的端口：没设过或和主端口冲突时，用默认端口。 */
 export function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, mainPort: number): number {
-  const port = settings.lanPort ?? mainPort + 1;
-  return port === mainPort ? mainPort + 1 : port;
+  const port = settings.lanPort ?? defaultLanPort(mainPort);
+  return port === mainPort ? defaultLanPort(mainPort) : port;
 }
 
 /** 局域网端口是否可用：在范围内，且不等于 dsh 主端口。 */
 export function isValidPort(port: unknown, mainPort: number): boolean {
   return isPortInRange(port) && port !== mainPort;
+}
+
+function mintedList(v: unknown): { h: string; exp: number }[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (x): x is { h: string; exp: number } =>
+      typeof x === 'object' &&
+      x !== null &&
+      typeof (x as { h?: unknown }).h === 'string' &&
+      typeof (x as { exp?: unknown }).exp === 'number',
+  );
 }
 
 /** 读进来的设置：缺的、不合法的字段用默认值。 */
@@ -169,16 +187,7 @@ export function normalizeSettings(raw: unknown): Settings {
       ? src.sessionMaxAgeDays
       : DEFAULT_SETTINGS.sessionMaxAgeDays,
     sessionSecret: typeof src.sessionSecret === 'string' ? src.sessionSecret : null,
-    localLoginRequiredSince:
-      typeof src.localLoginRequiredSince === 'number' ? src.localLoginRequiredSince : null,
-    lockedMintedCookies: Array.isArray(src.lockedMintedCookies)
-      ? src.lockedMintedCookies.filter(
-          (x): x is { h: string; exp: number } =>
-            typeof x === 'object' &&
-            x !== null &&
-            typeof (x as { h?: unknown }).h === 'string' &&
-            typeof (x as { exp?: unknown }).exp === 'number',
-        )
-      : [],
+    mintTrackingSince: typeof src.mintTrackingSince === 'number' ? src.mintTrackingSince : null,
+    pluginMintedCookies: mintedList(src.pluginMintedCookies),
   };
 }

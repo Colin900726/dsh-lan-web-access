@@ -213,11 +213,6 @@ export function coerceSettingsPatch(
     if (!body.allowLoopback && current.passwordHash === null)
       return { ok: false, error: '需要先设置管理密码', code: ERROR_CODES.passwordRequired };
     patch.allowLoopback = body.allowLoopback;
-    // 关掉时记下时刻，之前签发的 cookie 都不再认（见 guard.ts）。
-    if (body.allowLoopback !== current.allowLoopback) {
-      patch.localLoginRequiredSince = body.allowLoopback ? null : Date.now();
-      patch.lockedMintedCookies = [];
-    }
   }
   if (typeof body.lanEnabled === 'boolean') {
     if (body.lanEnabled && current.passwordHash === null)
@@ -328,7 +323,7 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/login',
-      handler: (req, res) => {
+      handler: async (req, res) => {
         const ip = clientIp(req);
         sendHtml(
           res,
@@ -384,11 +379,10 @@ export function registerAdminApi(rt: Runtime): () => void {
             const secret = await loadSigningSecret(getCredentials());
             if (authority === undefined || secret === undefined) return [];
             const cookie = issueNativeCookie(secret, authority);
-            if (!settingsStore.get().allowLoopback)
-              rt.recordLockedMint(
-                nativeCookieFingerprint(setCookieValue(cookie)),
-                Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
-              );
+            rt.recordPluginMint(
+              nativeCookieFingerprint(setCookieValue(cookie)),
+              Date.now() + NATIVE_COOKIE_MAX_AGE_SEC * 1000,
+            );
             return [cookie];
           },
         });
@@ -399,7 +393,7 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/logout',
-      handler: (req, res) => {
+      handler: async (req, res) => {
         const token = readSessionToken(req);
         if (token) {
           const payload = sessions.validate(token);
@@ -415,9 +409,14 @@ export function registerAdminApi(rt: Runtime): () => void {
       },
     });
 
-    const requireLocal = (req: IncomingMessage, res: ServerResponse): boolean => {
-      if (isLocalRequest(req)) return true;
-      jsonResponse(res, 403, { error: '仅限本机操作', code: ERROR_CODES.localOnly });
+    /** 管理操作只限本机；本机免登录关着时还要先登录（见 guard.ts adminAllowed）。 */
+    const requireLocal = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
+      if (!isLocalRequest(req)) {
+        jsonResponse(res, 403, { error: '仅限本机操作', code: ERROR_CODES.localOnly });
+        return false;
+      }
+      if (await rt.adminAllowed(req)) return true;
+      jsonResponse(res, 401, { error: '需要先登录', code: ERROR_CODES.loginRequired });
       return false;
     };
 
@@ -426,7 +425,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       kind: 'exact',
       path: '/api/remote-access/settings',
       handler: async (req, res) => {
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         if (req.method === 'GET') {
           jsonResponse(res, 200, sanitizeSettings(settingsStore.get()));
           return;
@@ -498,7 +497,7 @@ export function registerAdminApi(rt: Runtime): () => void {
           res.end();
           return;
         }
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         let body: Record<string, unknown>;
         try {
           body = await parseJsonBody(req);
@@ -527,13 +526,13 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/password/clear',
-      handler: (req, res) => {
+      handler: async (req, res) => {
         if (req.method !== 'POST') {
           res.writeHead(405);
           res.end();
           return;
         }
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         const sessionSecret = makeSessionSecret();
         // 没密码时本机免登录必须开着，否则谁都进不去。
         const reopenedLocal = !settingsStore.get().allowLoopback;
@@ -543,8 +542,6 @@ export function registerAdminApi(rt: Runtime): () => void {
           sessionSecret,
           lanEnabled: false,
           allowLoopback: true,
-          localLoginRequiredSince: null,
-          lockedMintedCookies: [],
         });
         rt.ctx.logger?.info('remote-access: password cleared, lan disabled');
         jsonResponse(res, 200, { ok: true, reopenedLocal });
@@ -555,8 +552,8 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/sessions',
-      handler: (req, res) => {
-        if (!requireLocal(req, res)) return;
+      handler: async (req, res) => {
+        if (!(await requireLocal(req, res))) return;
         jsonResponse(res, 200, { sessions: sessions.list() });
       },
     });
@@ -571,7 +568,7 @@ export function registerAdminApi(rt: Runtime): () => void {
           res.end();
           return;
         }
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         let body: Record<string, unknown>;
         try {
           body = await parseJsonBody(req);
@@ -593,13 +590,13 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/kick-all',
-      handler: (req, res) => {
+      handler: async (req, res) => {
         if (req.method !== 'POST') {
           res.writeHead(405);
           res.end();
           return;
         }
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         const all = sessions.list();
         sessions.kickAll();
         for (const x of all) rt.log.record('kick', normalizeIp(x.ip) ?? x.ip, '全部退出登录');
@@ -611,8 +608,8 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/devices',
-      handler: (req, res) => {
-        if (!requireLocal(req, res)) return;
+      handler: async (req, res) => {
+        if (!(await requireLocal(req, res))) return;
         const s = settingsStore.get();
         jsonResponse(
           res,
@@ -633,8 +630,8 @@ export function registerAdminApi(rt: Runtime): () => void {
     route({
       kind: 'exact',
       path: '/api/remote-access/logs',
-      handler: (req, res) => {
-        if (!requireLocal(req, res)) return;
+      handler: async (req, res) => {
+        if (!(await requireLocal(req, res))) return;
         const list = settingsStore.get().whitelist;
         jsonResponse(res, 200, {
           logs: rt.log.list().map((e) => ({
@@ -650,7 +647,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       kind: 'exact',
       path: '/api/remote-access/update',
       handler: async (req, res) => {
-        if (!requireLocal(req, res)) return;
+        if (!(await requireLocal(req, res))) return;
         const busy = rt.update.state === 'running' || rt.update.state === 'done';
         if (req.method === 'GET') {
           if (!busy) {
@@ -665,13 +662,20 @@ export function registerAdminApi(rt: Runtime): () => void {
           res.end();
           return;
         }
-        if (busy || rt.update.latest === undefined) {
+        // 只有查到新版本、或上次失败要重试时才更新。
+        const canRun = rt.update.state === 'available' || rt.update.state === 'failed';
+        if (!canRun || rt.update.latest === undefined) {
           jsonResponse(res, 200, rt.update);
           return;
         }
         const target = rt.update.latest;
         rt.update = { state: 'running', current: rt.version, latest: target };
-        const result = await runUpdate(rt.profile, target);
+        let result: Awaited<ReturnType<typeof runUpdate>>;
+        try {
+          result = await runUpdate(rt.profile, target);
+        } catch (error) {
+          result = { ok: false, reason: 'failed', output: String(error) };
+        }
         // 让以后只填包名也装最新版（见 allowLatestInstall）。
         if (result.ok) allowLatestInstall();
         rt.update = result.ok
@@ -681,9 +685,8 @@ export function registerAdminApi(rt: Runtime): () => void {
               current: rt.version,
               latest: target,
               reason: result.reason ?? 'failed',
-              ...(result.reason === 'no-command'
-                ? { command: manualUpdateCommand(rt.profile, target) }
-                : {}),
+              // 不管哪种失败都给手动命令，用户可以自己在终端试。
+              command: manualUpdateCommand(rt.profile, target),
             };
         rt.log.record(
           'update',
@@ -700,7 +703,7 @@ export function registerAdminApi(rt: Runtime): () => void {
       path: '/api/remote-access/selfcheck',
       handler: async (req, res) => {
         if (req.method === 'POST') {
-          if (!requireLocal(req, res)) return;
+          if (!(await requireLocal(req, res))) return;
           await rt.recheck();
         }
         jsonResponse(res, 200, { checks: rt.checks, checkedAt: rt.checkedAt, fault: rt.fault() });

@@ -62,6 +62,8 @@ export function failureText(failure: SaveFailure): string {
   switch (failure.code) {
     case ERROR_CODES.localOnly:
       return t.errors.localOnly;
+    case ERROR_CODES.loginRequired:
+      return t.errors.loginRequired;
     case ERROR_CODES.passwordRequired:
       return t.conn.needPassword;
     case ERROR_CODES.invalidSetting:

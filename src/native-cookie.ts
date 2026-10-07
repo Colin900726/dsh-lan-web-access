@@ -61,9 +61,12 @@ export function readNativeCookie(
   return undefined;
 }
 
-/** 读到的签名密钥，缓存一分钟（dsh 换了密钥，一分钟内能读到新的）。 */
+/** 异步读取时的缓存：一分钟内不重复读（运行检查用它反映 dsh 的真实情况）。 */
 const secretCache = new WeakMap<object, { secret: Buffer; at: number }>();
-/** 最近一次读到的密钥。credentials 每次拿到的都是新的代理对象，缓存按原对象当键，再备一份这个。 */
+/**
+ * 最近一次读到的密钥，同步校验请求时用它，不过期（dsh 运行期间密钥不变）。
+ * credentials 每次拿到的都是新的代理对象，缓存按原对象当键，再备一份这个。
+ */
 let latestSecret: Buffer | undefined;
 const SECRET_CACHE_MS = 60_000;
 

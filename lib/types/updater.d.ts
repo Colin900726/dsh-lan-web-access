@@ -49,8 +49,9 @@ export declare function runUpdate(profile: string, version: string, options?: {
  *
  * pnpm 默认不装发布不到一天的版本，每装一个新版本就往 `minimumReleaseAgeExclude` 名单加一条
  * `dsh-lan-web-access@x.y.z`；名单里本包有多条时它只认第一条，删了重装就会装回旧版。
- * 这里把本插件的条目换成一条不带版本号的，对所有版本放行。别的包的条目不动。
+ * 这里把名单里本插件的条目换成一条不带版本号的，对所有版本放行。别的条目、别的键都不动，
+ * 换行方式和缩进照原样；名单是单行写法（`[a, b]`）时不动。
  * @returns 有没有改动文件
  */
-export declare function allowLatestInstall(file?: URL): boolean;
+export declare function allowLatestInstall(file?: URL | undefined): boolean;
 export {};
