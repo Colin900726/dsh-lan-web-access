@@ -10,7 +10,7 @@ export declare class SettingsStore {
     private load;
     /**
      * Desktop 和 Web 可能同时在跑、共用这个文件：插件签发 cookie 的记录不能被对方整份覆盖掉，
-     * 写之前把文件里现有的合并进来（去重、去掉过期的），开始记录的时间取较晚的。
+     * 写之前把文件里现有的合并进来（去重），开始记录的时间取较晚的，再按上限整理。
      */
     private mergeMintRecords;
     private write;

@@ -80,13 +80,20 @@ export declare function effectiveLanPort(settings: Pick<Settings, 'lanPort'>, ma
 export declare function isValidPort(port: unknown, mainPort: number): boolean;
 /** 最多记多少条插件签发的 cookie 指纹（过期的会先清掉）。 */
 export declare const MAX_MINTED = 1000;
+type MintState = Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>;
 /**
- * 记下插件新签发的一张 cookie。记录满了要挤掉最旧的：把「开始记录的时间」挪到被挤掉的那些
- * 签发时间之后，它们从此一律不认——宁可多拒（Desktop 重启一次就好），不能错放。
+ * 整理插件签发记录：去掉过期的、签发早于「开始记录的时间」的（这些本来就一律不认，留着没用），
+ * 超过上限就挤掉最旧的，并把「开始记录的时间」挪到被挤掉的那些签发时间之后，
+ * 它们从此一律不认——宁可多拒（Desktop 重启一次就好），不能错放。
  */
-export declare function addMintRecord(s: Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>, record: {
+export declare function trimMintRecords(list: {
     h: string;
     exp: number;
-}, now: number, max?: number): Pick<Settings, 'pluginMintedCookies' | 'mintTrackingSince'>;
+}[], since: number, now: number, max?: number): MintState;
+/** 记下插件新签发的一张 cookie（见 trimMintRecords）。 */
+export declare function addMintRecord(s: MintState, record: {
+    h: string;
+    exp: number;
+}, now: number, max?: number): MintState;
 /** 读进来的设置：缺的、不合法的字段用默认值。 */
 export declare function normalizeSettings(raw: unknown): Settings;

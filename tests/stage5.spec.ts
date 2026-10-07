@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver';
 import { apply } from '../src/index.ts';
 import { SettingsStore } from '../src/settings-store.ts';
+import { addMintRecord, MAX_MINTED } from '../src/settings.ts';
 import { hashPassword, makeSalt } from '../src/session-store.ts';
 import { dshVersionInRange } from '../src/selfcheck.ts';
 import { checkLatestVersion, runUpdate, UPDATE_SOURCES } from '../src/updater.ts';
@@ -515,6 +516,28 @@ describe('Desktop 和 Web 同时在跑、共用设置文件', () => {
       .pluginMintedCookies.map((x) => x.h)
       .sort();
     expect(hashes).toEqual(['from-a', 'from-b']);
+  });
+});
+
+describe('插件签发记录经过设置文件读写，也不超过上限', () => {
+  it('Given 连续记 1100 张（上限 1000），Then 文件里最多 1000 条，开始记录的时间挪到被挤掉的之后', () => {
+    const store = new SettingsStore();
+    const start = Date.now() - 10_000;
+    store.update({ mintTrackingSince: start, pluginMintedCookies: [] }, false);
+    for (let i = 0; i < 1100; i++)
+      store.update(
+        addMintRecord(
+          store.get(),
+          { h: `h${i}`, exp: Date.now() + i + 30 * 86_400_000 },
+          Date.now(),
+        ),
+        false,
+      );
+    const saved = new SettingsStore().get();
+    expect(saved.pluginMintedCookies.length).toBeLessThanOrEqual(MAX_MINTED);
+    expect(saved.pluginMintedCookies.some((x) => x.h === 'h1099')).toBe(true);
+    expect(saved.pluginMintedCookies.some((x) => x.h === 'h0')).toBe(false);
+    expect(saved.mintTrackingSince!).toBeGreaterThan(start);
   });
 });
 

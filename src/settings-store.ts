@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { Settings, DEFAULT_SETTINGS, normalizeSettings } from './settings.ts';
+import { Settings, DEFAULT_SETTINGS, normalizeSettings, trimMintRecords } from './settings.ts';
 import { makeSessionSecret } from './session-store.ts';
 
 /** dsh 的数据目录：有 `$DSH_HOME` 用它（支持 `~` 开头），否则是「用户目录/.dsh」。规则和 dsh 一致。 */
@@ -54,7 +54,7 @@ export class SettingsStore {
 
   /**
    * Desktop 和 Web 可能同时在跑、共用这个文件：插件签发 cookie 的记录不能被对方整份覆盖掉，
-   * 写之前把文件里现有的合并进来（去重、去掉过期的），开始记录的时间取较晚的。
+   * 写之前把文件里现有的合并进来（去重），开始记录的时间取较晚的，再按上限整理。
    */
   private mergeMintRecords(next: Settings): Settings {
     let onDisk: Settings;
@@ -71,7 +71,8 @@ export class SettingsStore {
       onDisk.mintTrackingSince === null || next.mintTrackingSince === null
         ? (next.mintTrackingSince ?? onDisk.mintTrackingSince)
         : Math.max(onDisk.mintTrackingSince, next.mintTrackingSince);
-    return { ...next, pluginMintedCookies: [...byHash.values()], mintTrackingSince: since };
+    if (since === null) return { ...next, pluginMintedCookies: [...byHash.values()] };
+    return { ...next, ...trimMintRecords([...byHash.values()], since, now) };
   }
 
   private write(next: Settings): void {
