@@ -7,6 +7,13 @@ import { SessionManager } from '../src/session-store.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import type { CredentialsLike } from '../src/native-cookie.ts';
 
+function chunkText(chunk: unknown): string {
+  if (chunk === undefined || chunk === null) return '';
+  if (typeof chunk === 'string') return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk).toString('utf8');
+  return String(chunk);
+}
+
 function mockRes(): ServerResponse {
   const res: Record<string, unknown> = {
     statusCode: 0,
@@ -16,8 +23,21 @@ function mockRes(): ServerResponse {
       this.statusCode = code;
       Object.assign(this.headers, h);
     },
+    write(chunk: unknown) {
+      this.body = String(this.body ?? '') + chunkText(chunk);
+      return true;
+    },
     end(d?: unknown) {
-      this.body = d ?? '';
+      if (d !== undefined) this.body = String(this.body ?? '') + chunkText(d);
+    },
+    on() {
+      return this;
+    },
+    once() {
+      return this;
+    },
+    off() {
+      return this;
     },
   };
   return res as unknown as ServerResponse;
@@ -49,14 +69,16 @@ function mockWebServer() {
   const exact = new Map<string, WebRoute>();
   const prefixes = new Map<string, WebRoute>();
   const upgrades = new Map<string, unknown>();
-  let fallback: WebRoute['handler'] | undefined;
+  let fallback: unknown;
   return {
     exact,
     prefixes,
     upgrades,
-    fallback,
     port: 19387,
     host: '127.0.0.1',
+    get fallback() {
+      return fallback;
+    },
     register: (route: WebRoute) => {
       exact.set(route.path, route);
       return () => exact.delete(route.path);
@@ -65,9 +87,11 @@ function mockWebServer() {
       upgrades.set((route as { path: string }).path, route);
       return () => {};
     },
-    registerFallback: (h: WebRoute['handler']) => {
-      fallback = h;
-      return () => {};
+    registerFallback: (seat: unknown) => {
+      fallback = seat;
+      return () => {
+        fallback = undefined;
+      };
     },
     tapIndex: (fn: (html: string) => string) => {
       tapped.push(fn);
@@ -261,5 +285,109 @@ describe('route wrapping', () => {
     const html = fn!('<html><head></head><body></body></html>');
     expect(html).toContain('ownsHost: true');
     expect(html).toContain('crypto.randomUUID');
+  });
+});
+
+/** 新版 dsh（0.2.1 起）的兜底席位：给的是 `{ resource }`，不是 handler 函数。 */
+function resourceSeat(body: string, status = 200, headers: Record<string, string> = {}) {
+  return {
+    resource: async () => new Response(body, { status, headers }),
+  };
+}
+
+describe('兜底席位（资源式）', () => {
+  it('Given 兜底席位给的是 { resource }，Then 包成 handler 注册进 webserver，不再直接调资源', () => {
+    ws.registerFallback(resourceSeat('index'));
+    expect(typeof ws.fallback).toBe('function');
+  });
+
+  it('Given 本机请求首页，Then 补签 dsh cookie 并返回跳板页', async () => {
+    let served = false;
+    ws.registerFallback({
+      resource: async () => {
+        served = true;
+        return new Response('index');
+      },
+    });
+    const res = mockRes();
+    await (ws.fallback as WebRoute['handler'])(
+      mockReq({ host: '127.0.0.1:19387', accept: 'text/html' }),
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(String((res.headers as Record<string, unknown>)['set-cookie'])).toContain('dsh-auth-');
+    expect(res.body).toContain('location.replace');
+    // 补签这个请求就结束了，首页本身下一个请求再取。
+    expect(served).toBe(false);
+  });
+
+  it('Given 未登录的局域网设备请求首页，Then 302 去 /login，不去碰资源', async () => {
+    let served = false;
+    ws.registerFallback({
+      resource: async () => {
+        served = true;
+        return new Response('index');
+      },
+    });
+    const res = mockRes();
+    await (ws.fallback as WebRoute['handler'])(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19388', accept: 'text/html' }),
+      res,
+    );
+    expect(res.statusCode).toBe(302);
+    expect((res.headers as Record<string, string>).location).toBe('/login');
+    expect(served).toBe(false);
+  });
+
+  it('Given 未授权的静态资源请求（非首页），Then 保持公开，照样交给资源', async () => {
+    const seen: string[] = [];
+    ws.registerFallback({
+      resource: async (request) => {
+        seen.push(request.url);
+        return new Response('body{}', { headers: { 'content-type': 'text/javascript' } });
+      },
+    });
+    const res = mockRes();
+    await (ws.fallback as WebRoute['handler'])(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19388', url: '/assets/app.js' }),
+      res,
+    );
+    expect(seen).toEqual(['http://192.168.1.5:19388/assets/app.js']);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('body{}');
+  });
+
+  it('Given 资源回了 303 + set-cookie（dsh 官方 token 换 cookie），Then 状态与 cookie 原样写出', async () => {
+    ws.registerFallback(
+      resourceSeat('', 303, { location: '/', 'set-cookie': 'dsh-auth-a=1; Path=/' }),
+    );
+    const res = mockRes();
+    await (ws.fallback as WebRoute['handler'])(
+      mockReq({ host: '127.0.0.1:19387', url: '/?token=t' }),
+      res,
+    );
+    expect(res.statusCode).toBe(303);
+    expect((res.headers as Record<string, string>).location).toBe('/');
+    expect((res.headers as Record<string, unknown>)['set-cookie']).toEqual([
+      'dsh-auth-a=1; Path=/',
+    ]);
+  });
+
+  it('Given 非 GET/HEAD 走到兜底席位，Then 405 并带上 allow', async () => {
+    let served = false;
+    ws.registerFallback({
+      resource: async () => {
+        served = true;
+        return new Response('x');
+      },
+    });
+    const res = mockRes();
+    await (ws.fallback as WebRoute['handler'])(
+      mockReq({ host: '127.0.0.1:19387', method: 'POST', url: '/api/x' }),
+      res,
+    );
+    expect(res.statusCode).toBe(405);
+    expect((res.headers as Record<string, string>).allow).toBe('GET, HEAD');
+    expect(served).toBe(false);
   });
 });
