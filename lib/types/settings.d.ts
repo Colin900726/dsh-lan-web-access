@@ -72,6 +72,13 @@ export { SESSION_MAX_AGE_CHOICES, DEFAULT_SESSION_MAX_AGE_DAYS, MIN_PASSWORD_LEN
 export declare function isValidSessionMaxAgeDays(value: unknown): value is number;
 /** 端口是否在 1–65535。 */
 export declare function isPortInRange(port: unknown): port is number;
+/**
+ * dsh 主端口。dsh 0.2.2 起类型上允许「还没开始监听」时为空；插件启动时网页服务早已监听，
+ * 实际不会为空，兜底返回 0（调用方据此不开局域网入口）。
+ */
+export declare function mainPortOf(webServer: {
+    readonly port: number | undefined;
+}): number;
 /** 局域网入口的默认端口：dsh 主端口 + 1。 */
 export declare function defaultLanPort(mainPort: number): number;
 /** 局域网入口实际用的端口：没设过或和主端口冲突时，用默认端口。 */

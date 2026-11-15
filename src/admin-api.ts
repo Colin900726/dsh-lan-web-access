@@ -12,7 +12,7 @@ import {
   isValidWhitelistValue,
   normalizeIp,
 } from './trust.ts';
-import { effectiveLanPort, isValidPort, isValidSessionMaxAgeDays } from './settings.ts';
+import { effectiveLanPort, isValidPort, isValidSessionMaxAgeDays, mainPortOf } from './settings.ts';
 import { computerName } from './machine-name.ts';
 import { hashPassword, makeSalt, makeSessionSecret, MIN_PASSWORD_LENGTH } from './session-store.ts';
 import { sessionCookieClear, readSessionToken } from './cookies.ts';
@@ -350,7 +350,7 @@ export function registerAdminApi(rt: Runtime): () => void {
             trusted,
             authenticated:
               !s.enabled || rt.fault() || (trusted && s.allowLoopback) || session !== undefined,
-            port: webServer.port,
+            port: mainPortOf(webServer),
             clientIp: clientIp(req),
             // 网卡列表只给本机看。
             withLanIps: local,
@@ -442,7 +442,7 @@ export function registerAdminApi(rt: Runtime): () => void {
           jsonResponse(res, 400, { error: '请求体非法', code: ERROR_CODES.invalidBody });
           return;
         }
-        const result = coerceSettingsPatch(body, settingsStore.get(), webServer.port);
+        const result = coerceSettingsPatch(body, settingsStore.get(), mainPortOf(webServer));
         if (!result.ok) {
           jsonResponse(res, 400, { error: result.error, code: result.code });
           return;
@@ -472,7 +472,7 @@ export function registerAdminApi(rt: Runtime): () => void {
               {
                 lanPort: result.patch.lanPort !== undefined ? result.patch.lanPort : before.lanPort,
               },
-              webServer.port,
+              mainPortOf(webServer),
             );
             jsonResponse(res, 409, {
               error: lanError === 'port-in-use' ? `端口 ${port} 被占用` : '局域网入口开不起来',

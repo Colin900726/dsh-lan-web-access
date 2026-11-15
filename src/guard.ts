@@ -4,7 +4,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver';
+import type {
+  WebServer,
+  WebRoute,
+  WebResource,
+  WebResourceRoute,
+  WebUpgradeRoute,
+} from '@deepseek-ai/dsh-host-webserver';
 import { timingSafeEqual } from 'node:crypto';
 import { isLoopbackAddress, isLoopbackHost } from './trust.ts';
 import { GATEWAY_HEADER } from './shared.ts';
@@ -119,6 +125,37 @@ function fromOwnGateway(req: IncomingMessage, token: string | undefined): boolea
 /** 插件是否在接管认证：总开关开着，且运行检查通过。 */
 function active(deps: GuardDeps): boolean {
   return deps.getSettings().enabled && deps.suspended?.() !== true;
+}
+
+/** 兜底路由：dsh 0.2.2 起可以是 handler，也可以是 `{ resource }`。 */
+type Fallback = WebRoute['handler'] | Pick<WebResourceRoute, 'resource'>;
+
+/** dsh 内部处理 resource 路由的方法（0.2.2 起有）：这里拿得到原始请求，守卫套在它上面。 */
+type ServeResource = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  target: URL,
+  resource: WebResource,
+) => Promise<void>;
+
+/**
+ * 守卫能不能挂全：dsh 用 resource 路由（0.2.2 起）时，必须找得到参数个数对得上的 serveResource，
+ * 否则这类路由会绕过登录检查。挂不全由运行检查判为不兼容、交回 dsh 官方认证。
+ * 「用 resource」看两处：有 readResource 方法，或任何已注册的路由 / 兜底带 resource。
+ */
+export function guardHookable(webServer: WebServer): boolean {
+  const raw = rawService(webServer) as unknown as Record<string, unknown>;
+  const hasResource = (x: unknown): boolean =>
+    typeof x === 'object' && x !== null && 'resource' in x;
+  const tables = [raw.exact, raw.prefixes].filter(
+    (t): t is Map<string, unknown> => t instanceof Map,
+  );
+  const usesResources =
+    typeof raw.readResource === 'function' ||
+    hasResource(raw.fallback) ||
+    tables.some((t) => [...t.values()].some(hasResource));
+  if (!usesResources) return true;
+  return typeof raw.serveResource === 'function' && raw.serveResource.length === 4;
 }
 
 /** 守卫挂在 webServer 上的记录：同一个 webServer 只留一份，重新安装时先拆旧的。 */
@@ -272,8 +309,8 @@ export function installGuard(deps: GuardDeps): () => void {
     const registerFallback = webServer.registerFallback.bind(webServer);
     /** 改写 webServer 上的方法，卸载时还原。 */
     const patchMethod = <K extends 'register' | 'registerUpgrade' | 'registerFallback'>(
-      key: K,
-      replacement: WebServer[K],
+      key: K | 'serveResource',
+      replacement: K extends 'serveResource' ? ServeResource : WebServer[K] | ServeResource,
     ): void => {
       const target = raw as unknown as Record<string, unknown>;
       const hadOwn = Object.prototype.hasOwnProperty.call(target, key);
@@ -285,9 +322,13 @@ export function installGuard(deps: GuardDeps): () => void {
         else delete target[key];
       });
     };
-    const guardedRoutes = new WeakSet<WebRoute>();
+    const guardedRoutes = new WeakSet<WebRoute | WebResourceRoute>();
     const guardedUpgrades = new WeakSet<WebUpgradeRoute>();
     const guardedFallbacks = new WeakSet<WebRoute['handler']>();
+    /** 公共路由（登录页、插件接口）的 resource：不拦。没登记过的 resource 一律要登录。 */
+    const publicResources = new WeakSet<WebResource>();
+    /** 兜底路由的 resource：首页要登录，静态资源公开。 */
+    const fallbackResources = new WeakSet<WebResource>();
 
     /** 放行的请求如果缺 dsh 的 cookie，现场补签；接管了响应返回 true。 */
     const settleCookie = async (req: IncomingMessage, res: ServerResponse): Promise<boolean> => {
@@ -335,9 +376,8 @@ export function installGuard(deps: GuardDeps): () => void {
         await handler(req, res);
       };
 
-    const guardFallback = (handler: WebRoute['handler']): WebRoute['handler'] => {
-      if (guardedFallbacks.has(handler)) return handler;
-      guardedFallbacks.add(handler);
+    /** 兜底路由的放行规则：首页和非读请求要登录，其余读请求（静态资源）公开。 */
+    const fallbackGate = (handler: WebRoute['handler']): WebRoute['handler'] => {
       const guarded = guardHandler(handler);
       return async (req, res) => {
         let pathname: string;
@@ -358,9 +398,26 @@ export function installGuard(deps: GuardDeps): () => void {
       };
     };
 
-    const guardRoute = (route: WebRoute): void => {
-      if (guardedRoutes.has(route) || deps.isPublicRoute(route.path)) return;
+    /** `{ resource }` 形式不改对象本身，记下 resource，由 serveResource 那一层把关。 */
+    const guardFallback = (fallback: Fallback): Fallback => {
+      if (typeof fallback !== 'function') {
+        fallbackResources.add(fallback.resource);
+        return fallback;
+      }
+      if (guardedFallbacks.has(fallback)) return fallback;
+      guardedFallbacks.add(fallback);
+      return fallbackGate(fallback);
+    };
+
+    const guardRoute = (route: WebRoute | WebResourceRoute): void => {
+      if (guardedRoutes.has(route)) return;
+      if (deps.isPublicRoute(route.path)) {
+        if ('resource' in route) publicResources.add(route.resource);
+        return;
+      }
       guardedRoutes.add(route);
+      // resource 路由不改对象本身：由 serveResource 那一层把关（默认要登录）。
+      if ('resource' in route) return;
       const original = route.handler;
       const wrapped = guardHandler(original);
       route.handler = wrapped;
@@ -397,16 +454,17 @@ export function installGuard(deps: GuardDeps): () => void {
 
     // 包装已经注册的路由（别的插件可能比本插件先注册）。
     const tables = raw as unknown as {
-      exact?: Map<string, WebRoute>;
-      prefixes?: Map<string, WebRoute>;
+      exact?: Map<string, WebRoute | WebResourceRoute>;
+      prefixes?: Map<string, WebRoute | WebResourceRoute>;
       upgrades?: Map<string, WebUpgradeRoute>;
-      fallback?: WebRoute['handler'];
+      fallback?: Fallback;
+      serveResource?: ServeResource;
     };
     for (const route of tables.exact?.values() ?? []) guardRoute(route);
     for (const route of tables.prefixes?.values() ?? []) guardRoute(route);
     for (const route of tables.upgrades?.values() ?? []) guardUpgradeRoute(route);
     /** 把 fallback 换成包装版，卸载时换回。 */
-    const trackFallback = (original: WebRoute['handler'], wrapped: WebRoute['handler']): void => {
+    const trackFallback = (original: Fallback, wrapped: Fallback): void => {
       restores.push(() => {
         if (tables.fallback === wrapped) tables.fallback = original;
       });
@@ -418,7 +476,7 @@ export function installGuard(deps: GuardDeps): () => void {
       trackFallback(original, wrapped);
     }
 
-    patchMethod('register', (route: WebRoute) => {
+    patchMethod('register', (route: WebRoute | WebResourceRoute) => {
       guardRoute(route);
       return register(route);
     });
@@ -426,11 +484,27 @@ export function installGuard(deps: GuardDeps): () => void {
       guardUpgradeRoute(route);
       return registerUpgrade(route);
     });
-    patchMethod('registerFallback', (handler: WebRoute['handler']) => {
-      const wrapped = guardFallback(handler);
-      trackFallback(handler, wrapped);
+    patchMethod('registerFallback', (fallback: Fallback) => {
+      const wrapped = guardFallback(fallback);
+      trackFallback(fallback, wrapped);
       return registerFallback(wrapped);
     });
+
+    // resource 路由（dsh 0.2.2 起）：dsh 都经 serveResource 应答，在这一层把关。
+    // 进程内读取（readResource）不经过这里，由调用方自己认证，按 dsh 的约定不拦。
+    const serveResource = tables.serveResource;
+    if (typeof serveResource === 'function') {
+      const original = serveResource.bind(raw);
+      const guardedServe: ServeResource = async (req, res, target, resource) => {
+        const inner: WebRoute['handler'] = (rq, rs) => original(rq, rs, target, resource);
+        // 默认要登录：只有登记为公共的放行、兜底按兜底规则；认不出的（含 dsh 改了参数）一律把关。
+        if (typeof resource === 'function' && publicResources.has(resource)) return inner(req, res);
+        if (typeof resource === 'function' && fallbackResources.has(resource))
+          return fallbackGate(inner)(req, res);
+        return guardHandler(inner)(req, res);
+      };
+      patchMethod('serveResource', guardedServe);
+    }
   } catch (error) {
     // 装到一半失败：撤掉已装的部分。
     record.dispose(true);

@@ -31,6 +31,12 @@ export interface GuardDeps {
     recordPluginMint?: (fingerprint: string, expiresAt: number) => void;
 }
 /**
+ * 守卫能不能挂全：dsh 用 resource 路由（0.2.2 起）时，必须找得到参数个数对得上的 serveResource，
+ * 否则这类路由会绕过登录检查。挂不全由运行检查判为不兼容、交回 dsh 官方认证。
+ * 「用 resource」看两处：有 readResource 方法，或任何已注册的路由 / 兜底带 resource。
+ */
+export declare function guardHookable(webServer: WebServer): boolean;
+/**
  * 请求是否放行：
  * - 主端口只认本机请求，局域网设备必须走局域网入口；
  * - 局域网入口转发来的、本机免登录开着的本机请求、有有效登录的：放行；

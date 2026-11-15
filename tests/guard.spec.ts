@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver';
-import { installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
+import type {
+  WebServer,
+  WebRoute,
+  WebResource,
+  WebResourceRoute,
+} from '@deepseek-ai/dsh-host-webserver';
+import { guardHookable, installGuard, isAuthorized, type GuardDeps } from '../src/guard.ts';
 import { SessionManager } from '../src/session-store.ts';
 import { DEFAULT_SETTINGS, type Settings } from '../src/settings.ts';
 import type { CredentialsLike } from '../src/native-cookie.ts';
@@ -261,5 +266,288 @@ describe('route wrapping', () => {
     const html = fn!('<html><head></head><body></body></html>');
     expect(html).toContain('ownsHost: true');
     expect(html).toContain('crypto.randomUUID');
+  });
+});
+
+/**
+ * 仿 dsh 0.2.2 起的网页服务：路由和兜底可以给 resource（Fetch 风格），
+ * 分发顺序同 dsh：兜底是函数就直接调；有 resource 的走 serveResource；否则调 handler。
+ */
+class ResourceWebServer {
+  exact = new Map<string, WebRoute | WebResourceRoute>();
+  prefixes = new Map<string, WebRoute | WebResourceRoute>();
+  upgrades = new Map<string, unknown>();
+  fallback: WebRoute['handler'] | Pick<WebResourceRoute, 'resource'> | undefined;
+  port = 19387;
+  host = '127.0.0.1';
+  register(route: WebRoute | WebResourceRoute): () => void {
+    this.exact.set(route.path, route);
+    return () => this.exact.delete(route.path);
+  }
+  registerUpgrade(route: { path: string }): () => void {
+    this.upgrades.set(route.path, route);
+    return () => this.upgrades.delete(route.path);
+  }
+  registerFallback(fallback: WebRoute['handler'] | Pick<WebResourceRoute, 'resource'>): () => void {
+    this.fallback = fallback;
+    return () => {
+      this.fallback = undefined;
+    };
+  }
+  tapIndex(): () => void {
+    return () => {};
+  }
+  async readResource(): Promise<Response> {
+    return new Response(null, { status: 404 });
+  }
+  async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const target = new URL(req.url ?? '/', 'http://x');
+    const responder = this.exact.get(target.pathname) ?? this.fallback;
+    if (responder === undefined) {
+      res.writeHead(404, {});
+      res.end();
+      return;
+    }
+    if (typeof responder === 'function') await responder(req, res);
+    else if ('resource' in responder)
+      await this.serveResource(req, res, target, responder.resource);
+    else await responder.handler(req, res);
+  }
+  async serveResource(
+    _req: IncomingMessage,
+    res: ServerResponse,
+    target: URL,
+    resource: WebResource,
+  ): Promise<void> {
+    const response = await resource(new Request(target));
+    res.writeHead(response.status, {});
+    res.end(await response.text());
+  }
+}
+
+describe('dsh 0.2.2 起的 resource 路由', () => {
+  const authority = '127.0.0.1:19387';
+  const nativeName = `dsh-auth-${createHash('sha256').update(authority).digest().toString('base64url')}`;
+  let rws: ResourceWebServer;
+  let calls: string[];
+  let dispose: () => void;
+  const resource =
+    (name: string): WebResource =>
+    async (request) => {
+      calls.push(`${name} ${new URL(request.url).pathname}`);
+      return new Response(name);
+    };
+
+  beforeEach(() => {
+    calls = [];
+    rws = new ResourceWebServer();
+    // dsh 的兜底（整个网页界面）先于插件注册，0.2.2 起是 { resource }。
+    rws.registerFallback({ resource: resource('spa') });
+    dispose = installGuard({ ...deps, webServer: rws as unknown as WebServer });
+  });
+
+  it('Given 具名 resource 路由，When 局域网设备直连主端口，Then 跳登录页、resource 不被调用', async () => {
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({
+        ip: '192.168.1.5',
+        host: '192.168.1.5:19387',
+        url: '/plugin-bundle',
+        accept: 'text/html',
+      }),
+      res,
+    );
+    expect(res.statusCode).toBe(302);
+    expect(calls).toEqual([]);
+  });
+
+  it('Given 具名 resource 路由，When 本机免登录开着、已带 dsh cookie，Then 正常应答', async () => {
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({ host: authority, url: '/plugin-bundle', cookie: `${nativeName}=v1.abc.def` }),
+      res,
+    );
+    expect(res.body).toBe('bundle');
+  });
+
+  it('Given 公共 resource 路由，Then 不拦', async () => {
+    rws.register({ kind: 'exact', path: '/login', resource: resource('login') });
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/login' }),
+      res,
+    );
+    expect(res.body).toBe('login');
+  });
+
+  it('Given { resource } 兜底，Then 不被改成函数；静态资源公开，首页要登录', async () => {
+    expect(typeof rws.fallback).toBe('object');
+    const asset = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/assets/index.js' }),
+      asset,
+    );
+    expect(asset.body).toBe('spa');
+    const index = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/', accept: 'text/html' }),
+      index,
+    );
+    expect(index.statusCode).toBe(302);
+    expect((index.headers as Record<string, string>).location).toBe('/login');
+    expect(calls).toEqual(['spa /assets/index.js']);
+  });
+
+  it('Given { resource } 兜底，When 本机打开首页且已带 dsh cookie，Then 正常应答（不再报错 400）', async () => {
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({
+        host: authority,
+        url: '/',
+        accept: 'text/html',
+        cookie: `${nativeName}=v1.abc.def`,
+      }),
+      res,
+    );
+    expect(res.body).toBe('spa');
+  });
+
+  it('Given 插件停用，Then serveResource 还原成 dsh 自己的', () => {
+    expect(Object.prototype.hasOwnProperty.call(rws, 'serveResource')).toBe(true);
+    dispose();
+    expect(Object.prototype.hasOwnProperty.call(rws, 'serveResource')).toBe(false);
+  });
+
+  it('guardHookable：支持 resource 却找不到 serveResource 时为 false（运行检查据此安全退出）', () => {
+    expect(guardHookable(rws as unknown as WebServer)).toBe(true);
+    expect(guardHookable(ws)).toBe(true); // 0.2.0 式：没有 resource
+    const broken = { readResource: async () => new Response(null) };
+    expect(guardHookable(broken as unknown as WebServer)).toBe(false);
+  });
+
+  it('Given 插件停用，When 局域网设备再请求 resource 路由，Then 不再被插件拦（交回 dsh）', async () => {
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    dispose();
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/plugin-bundle' }),
+      res,
+    );
+    expect(res.body).toBe('bundle');
+  });
+
+  it('Given 安装守卫之前已注册的具名 / 前缀 resource 路由，Then 同样要登录', async () => {
+    const pre = new ResourceWebServer();
+    pre.register({ kind: 'exact', path: '/early', resource: resource('early') });
+    pre.prefixes.set('/pfx', { kind: 'prefix', path: '/pfx', resource: resource('pfx') });
+    installGuard({ ...deps, webServer: pre as unknown as WebServer });
+    const res = mockRes();
+    await pre.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/early' }),
+      res,
+    );
+    expect(res.statusCode).toBe(401);
+    const pfx = mockRes();
+    await pre.serveResource(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/pfx/a' }),
+      pfx,
+      new URL('http://x/pfx/a'),
+      pre.prefixes.get('/pfx')!.resource as WebResource,
+    );
+    expect(pfx.statusCode).toBe(401);
+    expect(calls).toEqual([]);
+  });
+
+  it('Given 绕过 register 直接塞进路由表的 resource（认不出），Then 默认要登录', async () => {
+    rws.exact.set('/sneaky', { kind: 'exact', path: '/sneaky', resource: resource('sneaky') });
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/sneaky' }),
+      res,
+    );
+    expect(res.statusCode).toBe(401);
+    expect(calls).toEqual([]);
+  });
+
+  it('Given 安装之后才用 registerFallback({ resource }) 注册兜底，Then 静态资源公开、首页要登录', async () => {
+    const late = new ResourceWebServer();
+    installGuard({ ...deps, webServer: late as unknown as WebServer });
+    late.registerFallback({ resource: resource('late') });
+    expect(typeof late.fallback).toBe('object');
+    const asset = mockRes();
+    await late.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/a.js' }),
+      asset,
+    );
+    expect(asset.body).toBe('late');
+    const index = mockRes();
+    await late.dispatch(
+      mockReq({
+        ip: '192.168.1.5',
+        host: '192.168.1.5:19387',
+        url: '/index.html',
+        accept: 'text/html',
+      }),
+      index,
+    );
+    expect(index.statusCode).toBe(302);
+  });
+
+  it('Given 经局域网入口转发（带网关令牌），Then resource 路由和兜底首页放行', async () => {
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    const viaGateway = (url: string) =>
+      mockReq({
+        host: authority,
+        url,
+        gateway: 'gw-token-of-this-process',
+        cookie: `${nativeName}=v1.abc.def`,
+      });
+    const a = mockRes();
+    await rws.dispatch(viaGateway('/plugin-bundle'), a);
+    expect(a.body).toBe('bundle');
+    const b = mockRes();
+    await rws.dispatch(viaGateway('/'), b);
+    expect(b.body).toBe('spa');
+  });
+
+  it('Given 本机已放行但缺 dsh cookie，Then resource 路由照旧补签 cookie（303），首页导航给跳转页', async () => {
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    const a = mockRes();
+    await rws.dispatch(mockReq({ host: authority, url: '/plugin-bundle' }), a);
+    expect(a.statusCode).toBe(303);
+    expect((a.headers as Record<string, string>)['set-cookie']).toContain('dsh-auth-');
+    const b = mockRes();
+    await rws.dispatch(mockReq({ host: authority, url: '/', accept: 'text/html' }), b);
+    expect(b.statusCode).toBe(200);
+    expect((b.headers as Record<string, string>)['set-cookie']).toContain('dsh-auth-');
+    expect(calls).toEqual([]);
+  });
+
+  it('Given 总开关关着，Then resource 路由不拦（交回 dsh 官方认证）', async () => {
+    settings.enabled = false;
+    rws.register({ kind: 'exact', path: '/plugin-bundle', resource: resource('bundle') });
+    const res = mockRes();
+    await rws.dispatch(
+      mockReq({ ip: '192.168.1.5', host: '192.168.1.5:19387', url: '/plugin-bundle' }),
+      res,
+    );
+    expect(res.body).toBe('bundle');
+  });
+
+  it('guardHookable：有 resource 路由但没有 readResource、serveResource 参数个数不对，都判 false', () => {
+    const noRead = new ResourceWebServer() as unknown as Record<string, unknown>;
+    noRead.readResource = undefined;
+    noRead.serveResource = undefined;
+    (noRead.exact as Map<string, unknown>).set('/r', {
+      kind: 'exact',
+      path: '/r',
+      resource: resource('r'),
+    });
+    expect(guardHookable(noRead as unknown as WebServer)).toBe(false);
+    const changed = new ResourceWebServer() as unknown as Record<string, unknown>;
+    changed.serveResource = async (_a: unknown, _b: unknown) => {};
+    expect(guardHookable(changed as unknown as WebServer)).toBe(false);
   });
 });

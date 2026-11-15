@@ -5,7 +5,7 @@
  * 插件自己的管理接口不转发。
  */
 import type { Runtime } from './runtime.ts';
-import type { Settings } from './settings.ts';
+import { type Settings } from './settings.ts';
 export interface GatewayHandle {
     /** 按当前设置断开不该再连着的长连接（被踢、被移出列表、免密被关）。 */
     enforce(revokedSids?: string[]): void;

@@ -24,7 +24,7 @@ import {
 } from './guard.ts';
 import { registerAdminApi, jsonResponse } from './admin-api.ts';
 import { createGateway, whitelistAllows, type GatewayHandle } from './gateway.ts';
-import { addMintRecord, defaultLanPort, effectiveLanPort } from './settings.ts';
+import { addMintRecord, defaultLanPort, effectiveLanPort, mainPortOf } from './settings.ts';
 import { isLoopbackAddress } from './trust.ts';
 import { listLanIps } from './admin-api.ts';
 import type { LanState } from './shared.ts';
@@ -153,7 +153,7 @@ export function apply(ctx: Context, _config: Config): void {
     syncLan: () => Promise.resolve(undefined),
     lanState: () => ({
       host: '',
-      port: defaultLanPort(webServer.port),
+      port: defaultLanPort(mainPortOf(webServer)),
       portCustom: false,
       listening: false,
       hostMissing: false,
@@ -217,13 +217,20 @@ export function apply(ctx: Context, _config: Config): void {
         return undefined;
       }
       if (gateway === undefined) gateway = createGateway(rt);
+      // 主端口还不知道（理论上不会）：入口转发不了，先不开。
+      if (mainPortOf(webServer) === 0) {
+        ctx.logger.warn('remote-access: dsh main port unknown, LAN entry not started');
+        await gateway.stop();
+        lanError = 'start-failed';
+        return lanError;
+      }
       if (s.lanHost !== '' && !listLanIps().some((i) => i.address === s.lanHost)) {
         await gateway.stop();
         lanError = 'host-unavailable';
         return lanError;
       }
       try {
-        await gateway.start(s.lanHost, effectiveLanPort(s, webServer.port));
+        await gateway.start(s.lanHost, effectiveLanPort(s, mainPortOf(webServer)));
         lanError = undefined;
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
@@ -254,7 +261,7 @@ export function apply(ctx: Context, _config: Config): void {
     const s = settingsStore.get();
     return {
       host: s.lanHost,
-      port: effectiveLanPort(s, webServer.port),
+      port: effectiveLanPort(s, mainPortOf(webServer)),
       portCustom: s.lanPort !== null,
       listening: gateway?.listening ?? false,
       ...(lanError !== undefined ? { error: lanError } : {}),

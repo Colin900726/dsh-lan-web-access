@@ -2,6 +2,8 @@
 
 import { createRequire } from 'node:module';
 import { loadSigningSecret } from './native-cookie.ts';
+import { guardHookable } from './guard.ts';
+import { mainPortOf } from './settings.ts';
 import { COMPAT_BELOW, COMPAT_MIN, type CheckId, type CheckResult } from './shared.ts';
 import type { Runtime } from './runtime.ts';
 
@@ -74,9 +76,13 @@ function fakeFailures(): Set<string> {
 export async function runSelfCheck(rt: Runtime): Promise<CheckResult[]> {
   const fake = fakeFailures();
   const settings = rt.settingsStore.get();
-  const port = rt.webServer?.port;
+  const port = rt.webServer === undefined ? undefined : mainPortOf(rt.webServer);
 
-  const webOk = rt.webServer !== undefined && typeof rt.webServer.register === 'function';
+  // 守卫挂不全（dsh 改了路由的应答方式）也算不通过，免得有路由绕过登录检查。
+  const webOk =
+    rt.webServer !== undefined &&
+    typeof rt.webServer.register === 'function' &&
+    guardHookable(rt.webServer);
   const signingOk = (await loadSigningSecret(rt.getCredentials())) !== undefined;
   const keyOk = settings.sessionSecret !== null;
   const dshVersion = readDshVersion() ?? null;

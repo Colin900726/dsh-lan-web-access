@@ -26,7 +26,7 @@ import { handleLoginPost, loginPageHtml, loginView, sendHtml } from './login.ts'
 import { computerName } from './machine-name.ts';
 import { GATEWAY_HEADER, jsonResponse, clientIp, buildStatus } from './admin-api.ts';
 import type { Runtime } from './runtime.ts';
-import type { Settings } from './settings.ts';
+import { mainPortOf, type Settings } from './settings.ts';
 
 export interface GatewayHandle {
   /** 按当前设置断开不该再连着的长连接（被踢、被移出列表、免密被关）。 */
@@ -51,7 +51,7 @@ export function whitelistAllows(ip: string, settings: Settings): boolean {
 
 export function createGateway(rt: Runtime): GatewayHandle {
   const { settingsStore, sessions, getCredentials, log } = rt;
-  const targetPort = () => rt.webServer.port;
+  const targetPort = () => mainPortOf(rt.webServer);
   const loopbackAuthority = () => `127.0.0.1:${targetPort()}`;
 
   let server: ReturnType<typeof createServer> | undefined;
