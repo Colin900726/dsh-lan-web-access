@@ -550,4 +550,13 @@ describe('dsh 0.2.2 起的 resource 路由', () => {
     changed.serveResource = async (_a: unknown, _b: unknown) => {};
     expect(guardHookable(changed as unknown as WebServer)).toBe(false);
   });
+
+  it('Given Desktop 启动握手（GET /?token=…，没有 dsh cookie），Then 原样交给 dsh 的兜底处理、不补签不跳转', async () => {
+    // PR #1（iceleaf916）报告：0.1.9 在这里回 400，Desktop 拿不到 cookie、启动失败。
+    const res = mockRes();
+    await rws.dispatch(mockReq({ host: authority, url: '/?token=launch-token' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe('spa');
+    expect(calls).toEqual(['spa /']);
+  });
 });
